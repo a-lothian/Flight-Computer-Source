@@ -1,4 +1,5 @@
 #include "fsm.h"
+#include "config.h"
 #include <math.h>
 #include <string.h>
 
@@ -56,7 +57,7 @@ static bool fsm_check_thrust(FSM_t *fsm, float IMUaccel_y,
     // based on blue raven data, it goes to above 10g sustained,
     // our thing will saturate at like 4g, so we'll put it at 3g
     return fsm_update_duration_condition(
-        IMUaccel_y > 3000.0f, &fsm->thrustConditionActive,
+        IMUaccel_y > LAUNCH_ACCEL_THRESHOLD_MG, &fsm->thrustConditionActive,
         &fsm->thrustConditionStartMs, fsm->minThrustDurationMs, currentTime_ms);
 }
 
@@ -65,7 +66,7 @@ static bool fsm_check_burnout(FSM_t *fsm, float IMUaccel_y,
     // based on blue raven data, after the initial 10g thrust period, it drops
     // to like ~-2, then goes to like 0
     return fsm_update_duration_condition(
-        IMUaccel_y < -1000.0f, &fsm->burnoutConditionActive,
+        IMUaccel_y < BURNOUT_ACCEL_THRESHOLD_MG, &fsm->burnoutConditionActive,
         &fsm->burnoutConditionStartMs, fsm->minBurnoutDurationMs,
         currentTime_ms);
 }
@@ -73,7 +74,7 @@ static bool fsm_check_burnout(FSM_t *fsm, float IMUaccel_y,
 static bool fsm_check_apogee(FSM_t *fsm, float IMUaccel_y,
                              uint32_t currentTime_ms) {
     return fsm_update_duration_condition(
-        IMUaccel_y < 0.0f, &fsm->apogeeConditionActive,
+        IMUaccel_y < APOGEE_ACCEL_THRESHOLD_MG, &fsm->apogeeConditionActive,
         &fsm->apogeeConditionStartMs, fsm->minApogeeDurationMs, currentTime_ms);
 }
 
@@ -97,40 +98,22 @@ static bool fsm_check_landed(FSM_t *fsm, float IMUgyro_x, float IMUgyro_y,
 void FSM_Init(FSM_t *fsm) {
     memset(fsm, 0, sizeof(*fsm));
     fsm->state = FSM_STATE_READY;
-    /* secondChuteAltitude is in FEET (see the unit note on FSM_t above).
-     * 900.0f matches this project's actual target main-deploy altitude -
-     * still update this if that target changes. */
-    fsm->secondChuteAltitude = 900.0f;
+    /* All thresholds come from config.h - tune them there. */
+    fsm->secondChuteAltitude = MAIN_DEPLOY_ALTITUDE_M;
 
-    /* Placeholder fallback timeouts, in case sensor-based detection ever
-     * fails to fire. These are LAST-RESORT safety nets, not meant to be
-     * the normal way transitions happen - they need to be comfortably
-     * longer than your motor's real burn time / real coast-to-apogee
-     * time (with margin), or they'll preempt real sensor detection
-     * exactly like the original 1234ms values did. Get real burn time
-     * from your motor's datasheet and real coast time from an OpenRocket
-     * (or similar) sim of this specific rocket/motor/mass combo, then
-     * set these to something like 1.5-2x that as headroom. */
-    fsm->maxExpectedThrustMs = 8000;
-    fsm->maxExpectedCoastMs = 45000;
-    fsm->tolerance = 10000.0f; // 10 degrees per second gyro
+    fsm->maxExpectedThrustMs = MAX_THRUST_DURATION_MS;
+    fsm->maxExpectedCoastMs = MAX_COAST_DURATION_MS;
+    fsm->tolerance = LANDED_GYRO_TOLERANCE_MDPS;
     fsm->haveStartingAltitude = false;
 
-    /* Placeholder durations - same "needs real tuning" caveat as every
-     * other constant in here. These are just plausible starting points:
-     * ~100ms of sustained accel is enough to reject a single bump/spike
-     * but still react fast to genuine motor ignition/burnout/apogee;
-     * "landed" intentionally requires a much longer, multi-second still
-     * period since a rocket settling under a canopy can wobble briefly
-     * right after touchdown. */
-    fsm->minThrustDurationMs = 100;
-    fsm->minBurnoutDurationMs = 100;
-    fsm->minApogeeDurationMs = 100;
-    fsm->minLandedDurationMs = 3000;
+    fsm->minThrustDurationMs = LAUNCH_CONFIRM_MS;
+    fsm->minBurnoutDurationMs = BURNOUT_CONFIRM_MS;
+    fsm->minApogeeDurationMs = APOGEE_CONFIRM_MS;
+    fsm->minLandedDurationMs = LANDED_CONFIRM_MS;
 }
 
-void FSM_SetStartingAltitude(FSM_t *fsm, float startingAltitude_ft) {
-    fsm->startingAltitude = startingAltitude_ft;
+void FSM_SetStartingAltitude(FSM_t *fsm, float startingAltitude_m) {
+    fsm->startingAltitude = startingAltitude_m;
     fsm->haveStartingAltitude = true;
 }
 
@@ -142,7 +125,7 @@ void FSM_SetActionCallback(FSM_t *fsm, FSM_ActionCallback_t cb, void *ctx) {
 bool FSM_NewReading(FSM_t *fsm, int8_t accel_x, int8_t accel_y, int8_t accel_z,
                     float IMUaccel_x, float IMUaccel_y, float IMUaccel_z,
                     float IMUgyro_x, float IMUgyro_y, float IMUgyro_z,
-                    float altitude_ft, uint32_t currentTime_ms) {
+                    float altitude_m, uint32_t currentTime_ms) {
     (void)accel_x;
     (void)accel_y;
     (void)accel_z;
@@ -151,11 +134,11 @@ bool FSM_NewReading(FSM_t *fsm, int8_t accel_x, int8_t accel_y, int8_t accel_z,
     (void)IMUgyro_z;
 
     if (!fsm->haveStartingAltitude) {
-        FSM_SetStartingAltitude(fsm, altitude_ft);
+        FSM_SetStartingAltitude(fsm, altitude_m);
     }
 
-    if (altitude_ft > fsm->maxReachedAltitude) {
-        fsm->maxReachedAltitude = altitude_ft;
+    if (altitude_m > fsm->maxReachedAltitude) {
+        fsm->maxReachedAltitude = altitude_m;
     }
 
     FSM_State_t before = fsm->state;
@@ -164,7 +147,7 @@ bool FSM_NewReading(FSM_t *fsm, int8_t accel_x, int8_t accel_y, int8_t accel_z,
     case FSM_STATE_READY: {
         bool thrustSustained =
             fsm_check_thrust(fsm, IMUaccel_y, currentTime_ms);
-        if (thrustSustained && (altitude_ft - fsm->startingAltitude > 10.0f)) {
+        if (thrustSustained && (altitude_m - fsm->startingAltitude > LAUNCH_MIN_ALTITUDE_GAIN_M)) {
             fsm_transition(fsm, FSM_STATE_THRUST, currentTime_ms);
         }
         break;
@@ -185,14 +168,12 @@ bool FSM_NewReading(FSM_t *fsm, int8_t accel_x, int8_t accel_y, int8_t accel_z,
 
         bool tiltCond = false; /* TODO: flag if tilt has changed > 90 deg (needs
                                   gyro integration) */
-        /* NOTE: this 10.0f margin is now 10 FEET (it used to be 10 meters
-         * back when altitude was in meters, i.e. it just got ~3x tighter).
-         * Worth widening if baro noise causes false triggers here. */
-        bool heightCond = (altitude_ft + 10.0f) < fsm->maxReachedAltitude;
+        bool heightCond =
+            (altitude_m + APOGEE_ALTITUDE_DROP_M) < fsm->maxReachedAltitude;
         int votes =
             (tiltCond ? 1 : 0) + (heightCond ? 1 : 0) + (velocityCond ? 1 : 0);
 
-        if (votes >= 2 ||
+        if (votes >= APOGEE_VOTES_REQUIRED ||
             (currentTime_ms - fsm->burnoutTime_ms) > fsm->maxExpectedCoastMs) {
             fsm_transition(fsm, FSM_STATE_APOGEE, currentTime_ms);
         }
@@ -200,7 +181,7 @@ bool FSM_NewReading(FSM_t *fsm, int8_t accel_x, int8_t accel_y, int8_t accel_z,
     }
 
     case FSM_STATE_APOGEE:
-        if ((altitude_ft + 10.0f) < fsm->secondChuteAltitude) {
+        if ((altitude_m + MAIN_DEPLOY_MARGIN_M) < fsm->secondChuteAltitude) {
             fsm_transition(fsm, FSM_STATE_SECOND_CHUTE, currentTime_ms);
         }
         break;

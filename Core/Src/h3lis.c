@@ -1,4 +1,5 @@
 #include "h3lis.h"
+#include "config.h"
 
 int h3lis_init(Accel_t* dev) {
 	uint8_t whoami = 0;
@@ -18,7 +19,7 @@ int h3lis_init(Accel_t* dev) {
 	}
 
 	// write config to CTRL_REG_1
-	uint8_t data_to_send = H3LIS_PM_NORMAL | H3LIS_DR_400HZ | H3LIS_ZEN | H3LIS_YEN | H3LIS_XEN;
+	uint8_t data_to_send = H3LIS_PM_NORMAL | H3LIS_DATA_RATE | H3LIS_ZEN | H3LIS_YEN | H3LIS_XEN;
 	HAL_I2C_Mem_Write(dev->i2c_handle,
 			dev->device_addr,
 			H3LIS_CTRL_REG1,

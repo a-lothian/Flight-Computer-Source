@@ -1,4 +1,5 @@
 #include "dps368.h"
+#include "config.h"
 #include <math.h>
 
 #define COEF_SIZE   18
@@ -159,5 +160,5 @@ void dps368_get_result(Baro_t *dev, int32_t *tmp, int32_t *prs)
 
 float dps368_get_altitude(int32_t prs)
 {
-    return 44330.0f * (1.0f - powf((float)prs / 101325.0f, 0.1903f));
+    return 44330.0f * (1.0f - powf((float)prs / BARO_SEA_LEVEL_PA, 0.1903f));
 }

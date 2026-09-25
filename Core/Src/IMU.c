@@ -6,6 +6,7 @@
  */
 
 #include "IMU.h"
+#include "config.h"
 
 /* LSM6DSOX power/config registers */
 #define IMU_CTRL1_XL   0x10   /* accelerometer power/config */
@@ -14,6 +15,53 @@
 
 #define CTRL3_C_BDU    (1 << 6)  /* Block Data Update: L/H output bytes latch together */
 #define CTRL3_C_IF_INC (1 << 2)  /* register address auto-increment (already default-on, set explicitly) */
+
+/* Register bits and LSB sensitivities for the ranges chosen in config.h
+ * (LSM6DSOX datasheet Table 2, CTRL1_XL / CTRL2_G). ODR is bits [7:4],
+ * full-scale is bits [3:2] for both registers. */
+#if   IMU_ODR_HZ == 104
+#define IMU_ODR_BITS (0x4 << 4)
+#elif IMU_ODR_HZ == 208
+#define IMU_ODR_BITS (0x5 << 4)
+#elif IMU_ODR_HZ == 416
+#define IMU_ODR_BITS (0x6 << 4)
+#elif IMU_ODR_HZ == 833
+#define IMU_ODR_BITS (0x7 << 4)
+#else
+#error "IMU_ODR_HZ must be 104, 208, 416 or 833"
+#endif
+
+#if   IMU_ACCEL_FS_G == 2
+#define IMU_ACCEL_FS_BITS  (0x0 << 2)
+#define IMU_ACCEL_MG_PER_LSB 0.061f
+#elif IMU_ACCEL_FS_G == 4
+#define IMU_ACCEL_FS_BITS  (0x2 << 2)
+#define IMU_ACCEL_MG_PER_LSB 0.122f
+#elif IMU_ACCEL_FS_G == 8
+#define IMU_ACCEL_FS_BITS  (0x3 << 2)
+#define IMU_ACCEL_MG_PER_LSB 0.244f
+#elif IMU_ACCEL_FS_G == 16
+#define IMU_ACCEL_FS_BITS  (0x1 << 2)
+#define IMU_ACCEL_MG_PER_LSB 0.488f
+#else
+#error "IMU_ACCEL_FS_G must be 2, 4, 8 or 16"
+#endif
+
+#if   IMU_GYRO_FS_DPS == 250
+#define IMU_GYRO_FS_BITS     (0x0 << 2)
+#define IMU_GYRO_MDPS_PER_LSB 8.75f
+#elif IMU_GYRO_FS_DPS == 500
+#define IMU_GYRO_FS_BITS     (0x1 << 2)
+#define IMU_GYRO_MDPS_PER_LSB 17.5f
+#elif IMU_GYRO_FS_DPS == 1000
+#define IMU_GYRO_FS_BITS     (0x2 << 2)
+#define IMU_GYRO_MDPS_PER_LSB 35.0f
+#elif IMU_GYRO_FS_DPS == 2000
+#define IMU_GYRO_FS_BITS     (0x3 << 2)
+#define IMU_GYRO_MDPS_PER_LSB 70.0f
+#else
+#error "IMU_GYRO_FS_DPS must be 250, 500, 1000 or 2000"
+#endif
 
 static void SPI_WriteRegister(IMU *dev, uint8_t address, uint8_t data)
 {
@@ -59,8 +107,8 @@ uint8_t IMU_Initialise(IMU *dev, SPI_HandleTypeDef *spi_handle, GPIO_TypeDef *cs
      * IF_INC=1 is the power-on default, set explicitly for clarity. */
     SPI_WriteRegister(dev, IMU_CTRL3_C, CTRL3_C_BDU | CTRL3_C_IF_INC);
 
-    uint8_t accelPower = 0b01011000; /* ODR 208 Hz, FS +/-4g, first-stage digital filtering output */
-    uint8_t gyroPower   = 0b01010000; /* ODR 208 Hz, FS 250 dps */
+    uint8_t accelPower = IMU_ODR_BITS | IMU_ACCEL_FS_BITS; /* first-stage digital filtering output */
+    uint8_t gyroPower  = IMU_ODR_BITS | IMU_GYRO_FS_BITS;
 
     SPI_WriteRegister(dev, IMU_CTRL1_XL, accelPower);
     SPI_WriteRegister(dev, IMU_CTRL2_G, gyroPower);
@@ -96,7 +144,7 @@ void ReadGyroscope(IMU *dev, uint8_t addressHi, uint8_t addressLo, uint8_t index
 
     int16_t gyrodata = (int16_t)((dataHi << 8) | dataLo);
 
-    dev->gyro[index] = 8.75f * gyrodata; /* 250dps sensitivity, output in mdps */
+    dev->gyro[index] = IMU_GYRO_MDPS_PER_LSB * gyrodata; /* output in mdps */
 }
 
 void ReadAcceleration(IMU *dev, uint8_t addressHi, uint8_t addressLo, uint8_t index)
@@ -106,7 +154,7 @@ void ReadAcceleration(IMU *dev, uint8_t addressHi, uint8_t addressLo, uint8_t in
 
     int16_t acceldata = (int16_t)((dataHi << 8) | dataLo);
 
-    dev->acceleration[index] = 0.122f * acceldata; /* +/-4g sensitivity, output in mg */
+    dev->acceleration[index] = IMU_ACCEL_MG_PER_LSB * acceldata; /* output in mg */
 }
 
 /* Convenience wrapper: reads all 6 axes in one call so main doesn't have to

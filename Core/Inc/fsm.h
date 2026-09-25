@@ -24,9 +24,8 @@ typedef enum {
 typedef void (*FSM_ActionCallback_t)(FSM_State_t newState,
                                      uint32_t currentTime_ms, void *ctx);
 
-/* ALL altitude values in this struct and in FSM_NewReading's altitude_ft
- * parameter are in FEET (not meters) - matches the sensor's native units,
- * so there's no unit conversion step anywhere to accidentally get wrong. */
+/* ALL altitude values in this struct and in FSM_NewReading's altitude_m
+ * parameter are in METRES. */
 typedef struct {
     FSM_State_t state;
 
@@ -72,10 +71,10 @@ typedef struct {
 /* Zero-initializes fsm and sets default thresholds/state = READY. */
 void FSM_Init(FSM_t *fsm);
 
-/* Optional: force the pad/ground altitude (in feet) instead of letting the
+/* Optional: force the pad/ground altitude (in metres) instead of letting the
  * first FSM_NewReading() call capture it automatically. Call this AFTER
  * FSM_Init. */
-void FSM_SetStartingAltitude(FSM_t *fsm, float startingAltitude_ft);
+void FSM_SetStartingAltitude(FSM_t *fsm, float startingAltitude_m);
 
 /* Optional: register a callback fired on every state transition. */
 void FSM_SetActionCallback(FSM_t *fsm, FSM_ActionCallback_t cb, void *ctx);
@@ -87,7 +86,7 @@ void FSM_SetActionCallback(FSM_t *fsm, FSM_ActionCallback_t cb, void *ctx);
 bool FSM_NewReading(FSM_t *fsm, int8_t accel_x, int8_t accel_y, int8_t accel_z,
                     float IMUaccel_x, float IMUaccel_y, float IMUaccel_z,
                     float IMUgyro_x, float IMUgyro_y, float IMUgyro_z,
-                    float altitude_ft, uint32_t currentTime_ms);
+                    float altitude_m, uint32_t currentTime_ms);
 
 FSM_State_t FSM_GetState(const FSM_t *fsm);
 const char *FSM_StateName(FSM_State_t state);

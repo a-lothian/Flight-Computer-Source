@@ -33,6 +33,8 @@
 #include "w25n.h"
 
 #include "fsm.h"
+
+#include "config.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -152,11 +154,11 @@ int main(void)
   MX_SPI1_Init();
   MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
-  for (int i = 0; i < 3; i++) {
+  for (int i = 0; i < STARTUP_BEEP_COUNT; i++) {
   		  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_4);
-  		  HAL_Delay(500);
+  		  HAL_Delay(STARTUP_BEEP_ON_MS);
   		  HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_4);
-  		  HAL_Delay(500);
+  		  HAL_Delay(STARTUP_BEEP_OFF_MS);
   	}
 
   accel.i2c_handle = &hi2c1;
@@ -169,8 +171,8 @@ int main(void)
   if (baroResult != DPS368_WHOAMI_VAL) {
 	  // nothing
   }
-  dps368_config_tmp(&baro, DPS368_MEAS_RATE_1, DPS368_SAMP_RATE_8);
-  dps368_config_prs(&baro, DPS368_MEAS_RATE_1, DPS368_SAMP_RATE_8);
+  dps368_config_tmp(&baro, BARO_TMP_MEAS_RATE, BARO_TMP_OVERSAMPLING);
+  dps368_config_prs(&baro, BARO_PRS_MEAS_RATE, BARO_PRS_OVERSAMPLING);
   dps368_set_opmode(&baro, DPS368_OPMODE_BACKGROUND_PRS_TMP);
 
   IMUResult = IMU_Initialise(&imu, &hspi3, GPIOA, GPIO_PIN_15);
@@ -185,7 +187,7 @@ int main(void)
   nand.hspi = &hspi1;
   nand.cs_port = GPIOA;
   nand.cs_pin = GPIO_PIN_4;
-  nand.timeout = 100;
+  nand.timeout = NAND_TIMEOUT_MS;
 
   W25N_Reset(&nand);
   nandStatus = W25N_Verify_ID(&nand);
@@ -203,14 +205,14 @@ int main(void)
 
   if (FSM_GetState(&fsm) == FSM_STATE_READY) {
 	  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_4);
-	  HAL_Delay(500);
+	  HAL_Delay(READY_BEEP_MS);
 	  HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_4);
   }
 
   uint32_t prevTick = HAL_GetTick();
 
   // reading all the data
-//  W25N_Log_Dump(&nand, 100000, &telemetry, sizeof(telemetry), PrintTelemetryRecord);
+//  W25N_Log_Dump(&nand, LOG_DUMP_PAGE_COUNT, &telemetry, sizeof(telemetry), PrintTelemetryRecord);
 
   /* USER CODE END 2 */
 
@@ -224,7 +226,7 @@ int main(void)
 
 	  uint32_t timeTick = HAL_GetTick();
 
-	  if (timeTick - prevTick > 20) {
+	  if (timeTick - prevTick >= MIN_CONTROL_LOOP_PERIOD_MS) {
 		  prevTick = timeTick;
 
 		  h3lis_read(&accel, &accelData);
@@ -242,9 +244,8 @@ int main(void)
 
 		  bool changed = FSM_NewReading(
 			  &fsm, 0, 0, 0, /* h3lis int8 accel: unused by fsm.c's logic */
-			  // this is INTENTIONALLY in the order [1] [0] [2]
-			  // the [0] is the one which reads 1000 mg when the rocket is upright
-			  imu.acceleration[1], imu.acceleration[0], imu.acceleration[2],
+			  // the FSM expects the vertical axis as its y input - see IMU_AXIS_* in config.h
+			  imu.acceleration[IMU_AXIS_LATERAL_A], imu.acceleration[IMU_AXIS_VERTICAL], imu.acceleration[IMU_AXIS_LATERAL_B],
 			  imu.gyro[0], imu.gyro[1], imu.gyro[2], altitude_m, timeTick);
 
 //		  printf("imu accel (mg): %.2f %.2f %.2f\r\n", imu.acceleration[0], imu.acceleration[1], imu.acceleration[2]);
