@@ -60,8 +60,8 @@ all: main-build
 main-build: flight-computer-testing.elf secondary-outputs
 
 # Tool invocations
-flight-computer-testing.elf flight-computer-testing.map: $(OBJS) $(USER_OBJS) /home/kevin/STM32CubeIDE/workspace_1.19.0/flight-computer-testing/STM32F446RETX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-gcc -o "flight-computer-testing.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"/home/kevin/STM32CubeIDE/workspace_1.19.0/flight-computer-testing/STM32F446RETX_FLASH.ld" --specs=nosys.specs -Wl,-Map="flight-computer-testing.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -u _printf_float -Wl,--start-group -lc -lm -Wl,--end-group
+flight-computer-testing.elf flight-computer-testing.map: $(OBJS) $(USER_OBJS) /Users/alexlothian/Documents/University/ADEPT\ Rocketry/flight-computer-testing/STM32F446RETX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-gcc -o "flight-computer-testing.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"/Users/alexlothian/Documents/University/ADEPT Rocketry/flight-computer-testing/STM32F446RETX_FLASH.ld" --specs=nosys.specs -Wl,-Map="flight-computer-testing.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -u _printf_float -Wl,--start-group -lc -lm -Wl,--end-group
 	@echo 'Finished building target: $@'
 	@echo ' '
 

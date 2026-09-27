@@ -3,6 +3,7 @@
 "./Core/Src/fsm.o"
 "./Core/Src/h3lis.o"
 "./Core/Src/main.o"
+"./Core/Src/mtr_control.o"
 "./Core/Src/stm32f4xx_hal_msp.o"
 "./Core/Src/stm32f4xx_it.o"
 "./Core/Src/syscalls.o"

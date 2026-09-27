@@ -34,6 +34,8 @@
 
 #include "fsm.h"
 
+#include "mtr_control.h"
+
 #include "config.h"
 /* USER CODE END Includes */
 
@@ -157,12 +159,24 @@ int main(void)
   MX_TIM2_Init();
   MX_TIM5_Init();
   /* USER CODE BEGIN 2 */
+
+  Motor_t airbrake_motor;
+
   for (int i = 0; i < STARTUP_BEEP_COUNT; i++) {
   		  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_4);
   		  HAL_Delay(STARTUP_BEEP_ON_MS);
   		  HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_4);
   		  HAL_Delay(STARTUP_BEEP_OFF_MS);
   	}
+
+
+  HAL_Delay(STARTUP_BEEP_OFF_MS);
+
+  // bench test: starts closed, fully deploy, wait 1s, fully retract
+  mtr_init(&airbrake_motor, &htim5, TIM_CHANNEL_1);
+  mtr_set_angle_deg(&airbrake_motor, MOTOR_ANGLE_MIN_DEG);
+  HAL_Delay(4000);
+//  mtr_set_angle_deg(&airbrake_motor, MOTOR_ANGLE_MAX_DEG);
 
   accel.i2c_handle = &hi2c1;
   accel.device_addr = H3LIS_ADDR_HIGH;

@@ -106,4 +106,21 @@
 #define STARTUP_BEEP_OFF_MS          200
 #define READY_BEEP_MS                500
 
+/* Motor ,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,, */
+
+/* Servo Calibration (DS5160, 270 degree version)
+ * MOTOR_PULSE_MIN_US puts the servo at 0 degrees, MOTOR_PULSE_MAX_US at
+ * MOTOR_RANGE_DEG. These describe the servo itself, not the airbrakes. */
+#define MOTOR_PULSE_MIN_US           500
+#define MOTOR_PULSE_MAX_US           2500
+#define MOTOR_RANGE_DEG              270.0f
+
+/* Airbrake Angle Limits
+ * Every command (degrees or raw pulse) is clamped to MOTOR_ANGLE_MIN_DEG ..
+ * MOTOR_ANGLE_MAX_DEG. Fully open = MIN, closed = MAX.
+ * MOTOR_STARTUP_ANGLE_DEG is sent as soon as the PWM starts - keep it closed. */
+#define MOTOR_ANGLE_MIN_DEG          45.0f
+#define MOTOR_ANGLE_MAX_DEG          230.0f
+#define MOTOR_STARTUP_ANGLE_DEG      230.0f
+
 #endif /* INC_CONFIG_H_ */
