@@ -40,6 +40,9 @@
 
 #include "sensor_fusion.h"
 #include "sensor_mount.h"
+
+#include "airbrake_api.h"
+#include "airbrake_io.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -60,6 +63,11 @@ typedef struct {
     float    fusion_accel_vert;   /* m/s^2, gravity removed, +up */
     float    fusion_tilt_deg;     /* nose from vertical */
     uint8_t  fusion_flags;        /* FUSION_FLAG_* bits */
+    float    ab_cmd;              /* deployment command, 0 closed .. 1 full */
+    float    ab_pred_apogee_m;    /* predicted apogee AGL, 0 while inhibited */
+    uint16_t ab_faults;           /* sticky AB_FAULT_* bits */
+    uint8_t  ab_mode;             /* AB_Mode */
+    uint8_t  ab_boot;             /* AB_BOOT_* bits */
 } TelemetryRecord_t;
 
 /* fusion_flags bits in the telemetry record */
@@ -68,6 +76,11 @@ typedef struct {
 #define FUSION_FLAG_DESCENT   (1u << 2)
 #define FUSION_FLAG_BARO_OK   (1u << 3)
 #define FUSION_FLAG_HIGH_G    (1u << 4)
+
+/* ab_boot bits in the telemetry record */
+#define AB_BOOT_CONFIGURED    (1u << 0) /* ab_configure() accepted the config at boot */
+#define AB_BOOT_SELF_TEST_OK  (1u << 1) /* ab_self_test() passed at boot */
+#define AB_BOOT_PAD_ELEVATION (1u << 2) /* reconfigured with the pad elevation at launch */
 
 /* USER CODE END PTD */
 
@@ -112,6 +125,8 @@ uint32_t loop_us, loop_us_max; /* loop body timing, see LoopTimer_* */
 
 FusionOutput fusion;
 int32_t last_prs_raw; /* a changed pressure is the only sign of a new baro sample */
+
+uint8_t ab_boot_flags;
 
 /* USER CODE END PV */
 
@@ -160,6 +175,8 @@ static void PrintTelemetryRecord(uint32_t page_addr, const uint8_t *data, uint32
     printf("  fusion: alt %.1fm vel %.1fm/s acc %.2fm/s2 tilt %.1fdeg flags 0x%02x\r\n",
            rec->fusion_altitude_m, rec->fusion_velocity_mps, rec->fusion_accel_vert,
            rec->fusion_tilt_deg, rec->fusion_flags);
+    printf("  airbrake: cmd %.3f apogee %.1fm mode %u faults 0x%04x boot 0x%02x\r\n",
+           rec->ab_cmd, rec->ab_pred_apogee_m, rec->ab_mode, rec->ab_faults, rec->ab_boot);
 }
 
 static uint8_t FusionFlags(const FusionOutput *f)
@@ -277,6 +294,15 @@ int main(void)
   // must be still from here
   fusion_init();
 
+  // provisional airbrake config (pad elevation is only known at launch), then
+  // the built-in self test. The brakes stay closed on the pad either way.
+  AB_Status ab_cfg_status = ab_io_configure(0.0f);
+  AB_Status ab_test_status = ab_self_test();
+  ab_boot_flags = (uint8_t)((ab_cfg_status == AB_OK ? AB_BOOT_CONFIGURED : 0u) |
+                            (ab_test_status == AB_OK ? AB_BOOT_SELF_TEST_OK : 0u));
+  printf("airbrake: Cd table %s, configure %d, self test %d\r\n",
+         ab_cd_table_provenance(), (int)ab_cfg_status, (int)ab_test_status);
+
   LoopTimer_Init();
   uint32_t prevTick = HAL_GetTick();
 
@@ -323,6 +349,23 @@ int main(void)
 			  imu.acceleration[IMU_AXIS_LATERAL_A], imu.acceleration[IMU_AXIS_VERTICAL], imu.acceleration[IMU_AXIS_LATERAL_B],
 			  imu.gyro[0], imu.gyro[1], imu.gyro[2], altitude_m, timeTick);
 
+		  if (changed && FSM_GetState(&fsm) == FSM_STATE_THRUST) {
+			  // launch: raw baro minus fusion AGL is the pad's pressure altitude,
+			  // which the airbrake's density model needs. Keep the boot config
+			  // if it's rejected
+			  if (ab_io_configure(altitude_m - fusion.altitude) == AB_OK) {
+				  ab_boot_flags |= AB_BOOT_PAD_ELEVATION;
+			  } else {
+				  (void)ab_io_configure(0.0f);
+			  }
+		  }
+
+		  // every loop, even while inhibited, so the core's servo model stays true
+		  AB_TickInput ab_in = ab_io_make_input(&fusion, FSM_GetState(&fsm), dt_s);
+		  AB_TickOutput ab_out;
+		  (void)ab_tick(&ab_in, &ab_out);
+		  mtr_set_angle_deg(&airbrake_motor, ab_io_servo_angle_deg(ab_out.deployment_cmd));
+
 //		  printf("imu accel (mg): %.2f %.2f %.2f\r\n", imu.acceleration[0], imu.acceleration[1], imu.acceleration[2]);
 //		  printf("imu gyro (mdps): %.2f %.2f %.2f\r\n", imu.gyro[0], imu.gyro[1], imu.gyro[2]);
 //
@@ -353,6 +396,11 @@ int main(void)
 		  telemetry.fusion_accel_vert = fusion.accel_vert;
 		  telemetry.fusion_tilt_deg = fusion.tilt_deg;
 		  telemetry.fusion_flags = FusionFlags(&fusion);
+		  telemetry.ab_cmd = ab_out.deployment_cmd;
+		  telemetry.ab_pred_apogee_m = ab_out.predicted_apogee_agl_m;
+		  telemetry.ab_faults = ab_out.fault_flags;
+		  telemetry.ab_mode = ab_out.mode;
+		  telemetry.ab_boot = ab_boot_flags;
 
 		  if (FSM_GetState(&fsm) != FSM_STATE_LANDED) {
 			  HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_6);

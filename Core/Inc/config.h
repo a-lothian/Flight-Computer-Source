@@ -127,4 +127,30 @@
 #define MOTOR_ANGLE_MAX_DEG          230.0f
 #define MOTOR_STARTUP_ANGLE_DEG      230.0f
 
+/* Airbrakes ,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,, */
+
+/* Master switch. 0 flies with the brakes held closed: ab_tick() still runs
+ * every loop (inhibited), so logging and the controller's own state are
+ * unchanged. The launch-day fallback if anything about the brakes is in doubt. */
+#define AIRBRAKE_ENABLED             1
+
+/* Coast (burnout) mass, told to the apogee predictor.
+ * UNVERIFIED: 19.69 kg is OpenRocket PostProd-4 Simulation 13. Weigh the
+ * rocket as flown and subtract the 3.77 kg of M1845NT propellant. */
+#define AB_COAST_MASS_KG             19.69f
+
+#define AB_TARGET_APOGEE_AGL_M       3048.0f  // 10,000 ft
+
+/* The brakes only move while the nose is within this angle of vertical.
+ * Matches the abort tilt the airbrake harness was tuned with
+ * (GatingMirror.java); confirm against the AURC airbrake rules. */
+#define AB_MAX_TILT_DEG              30.0f
+
+/* Deployment fraction (0 closed .. 1 full, 30 mm) -> servo angle.
+ * UNVERIFIED: linear from MOTOR_ANGLE_MAX_DEG (closed) to MOTOR_ANGLE_MIN_DEG
+ * (open) is a placeholder. The Cd table is in mm of extension, so measure the
+ * servo angle at 0/10/20/30 mm, fix ab_io_servo_angle_deg() if it isn't
+ * linear, then set this to 1 to silence the build warning. */
+#define AB_SERVO_MAPPING_VERIFIED    0
+
 #endif /* INC_CONFIG_H_ */
