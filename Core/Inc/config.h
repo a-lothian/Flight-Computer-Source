@@ -14,7 +14,7 @@
 
 /* Main loop ,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,, */
 
-#define MIN_CONTROL_LOOP_PERIOD_MS 10 // 100hz
+#define MIN_CONTROL_LOOP_PERIOD_MS 20 // 50hz - the sensor fusion is tuned and validated at this rate
 
 /* Flight state machine ,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,, */
 
@@ -73,15 +73,19 @@
  * Register bits and LSB sensitivities are derived from these in IMU.c, so
  * they can't get out of sync.
  * Accel FS: 2, 4, 8, 16 g.  Gyro FS: 250, 500, 1000, 2000 dps.
- * ODR: 104, 208, 416, 833 Hz. */
-#define IMU_ACCEL_FS_G               4
-#define IMU_GYRO_FS_DPS              250
+ * ODR: 104, 208, 416, 833 Hz.
+ * 16 g: boost is ~10 g, so anything lower clips for the whole burn.
+ * 2000 dps: attitude is gyro-only in flight; last year's flight rolled at
+ * ~940 dps, and any clipping becomes a permanent tilt error. */
+#define IMU_ACCEL_FS_G               16
+#define IMU_GYRO_FS_DPS              2000
 #define IMU_ODR_HZ                   208
 
 /* Barometer Rates
  * DPS368 measurement rate (per second) and oversampling, as enum values
- * from dps368.h. */
-#define BARO_PRS_MEAS_RATE           DPS368_MEAS_RATE_1
+ * from dps368.h. Pressure at 32 Hz so the fusion's Kalman filter gets a
+ * fresh reading most loops (at 1 Hz the altitude steps once a second). */
+#define BARO_PRS_MEAS_RATE           DPS368_MEAS_RATE_32
 #define BARO_PRS_OVERSAMPLING        DPS368_SAMP_RATE_8
 #define BARO_TMP_MEAS_RATE           DPS368_MEAS_RATE_1
 #define BARO_TMP_OVERSAMPLING        DPS368_SAMP_RATE_8
