@@ -37,6 +37,9 @@
 #include "mtr_control.h"
 
 #include "config.h"
+
+#include "sensor_fusion.h"
+#include "sensor_mount.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -52,7 +55,19 @@ typedef struct {
     uint8_t  fsm_state;
     uint32_t loop_us;      /* how long the PREVIOUS loop body took */
     uint32_t loop_us_max;  /* worst loop body since boot, must stay < 20000 */
+    float    fusion_altitude_m;   /* above the pad */
+    float    fusion_velocity_mps; /* vertical, +up */
+    float    fusion_accel_vert;   /* m/s^2, gravity removed, +up */
+    float    fusion_tilt_deg;     /* nose from vertical */
+    uint8_t  fusion_flags;        /* FUSION_FLAG_* bits */
 } TelemetryRecord_t;
+
+/* fusion_flags bits in the telemetry record */
+#define FUSION_FLAG_READY     (1u << 0)
+#define FUSION_FLAG_IN_FLIGHT (1u << 1)
+#define FUSION_FLAG_DESCENT   (1u << 2)
+#define FUSION_FLAG_BARO_OK   (1u << 3)
+#define FUSION_FLAG_HIGH_G    (1u << 4)
 
 /* USER CODE END PTD */
 
@@ -94,6 +109,9 @@ W25N_Status_t nandStatus; // expected W25N_OK after Verify_ID
 TelemetryRecord_t telemetry;
 
 uint32_t loop_us, loop_us_max; /* loop body timing, see LoopTimer_* */
+
+FusionOutput fusion;
+int32_t last_prs_raw; /* a changed pressure is the only sign of a new baro sample */
 
 /* USER CODE END PV */
 
@@ -139,6 +157,18 @@ static void PrintTelemetryRecord(uint32_t page_addr, const uint8_t *data, uint32
            rec->temperature_C, rec->pressure_hPa, rec->altitude_m);
     printf("  state: %s | loop %luus (max %luus)\r\n", FSM_StateName((FSM_State_t)rec->fsm_state),
            (unsigned long)rec->loop_us, (unsigned long)rec->loop_us_max);
+    printf("  fusion: alt %.1fm vel %.1fm/s acc %.2fm/s2 tilt %.1fdeg flags 0x%02x\r\n",
+           rec->fusion_altitude_m, rec->fusion_velocity_mps, rec->fusion_accel_vert,
+           rec->fusion_tilt_deg, rec->fusion_flags);
+}
+
+static uint8_t FusionFlags(const FusionOutput *f)
+{
+    return (uint8_t)((f->ready     ? FUSION_FLAG_READY     : 0u) |
+                     (f->in_flight ? FUSION_FLAG_IN_FLIGHT : 0u) |
+                     (f->descent   ? FUSION_FLAG_DESCENT   : 0u) |
+                     (f->baro_ok   ? FUSION_FLAG_BARO_OK   : 0u) |
+                     (f->high_g    ? FUSION_FLAG_HIGH_G    : 0u));
 }
 
 /* USER CODE END 0 */
@@ -243,6 +273,10 @@ int main(void)
 
   }
 
+  // the first ~2 s of updates calibrate the gyro and pad level, so the board
+  // must be still from here
+  fusion_init();
+
   LoopTimer_Init();
   uint32_t prevTick = HAL_GetTick();
 
@@ -262,6 +296,7 @@ int main(void)
 	  uint32_t timeTick = HAL_GetTick();
 
 	  if (timeTick - prevTick >= MIN_CONTROL_LOOP_PERIOD_MS) {
+		  float dt_s = (float)(timeTick - prevTick) * 0.001f;
 		  prevTick = timeTick;
 		  uint32_t loopStart = DWT->CYCCNT;
 
@@ -273,6 +308,14 @@ int main(void)
 		  altitude_m = dps368_get_altitude(prs_raw);
 
 		  ReadAllIMU(&imu);
+
+		  // raw chip axes -> rocket body frame happens in sensor_mount.h
+		  int8_t hg[3] = { accelData.accel_x, accelData.accel_y, accelData.accel_z };
+		  bool baro_new = (prs_raw != last_prs_raw);
+		  last_prs_raw = prs_raw;
+		  FusionInput fusion_in = sensor_mount_input(imu.acceleration, imu.gyro, hg,
+		                                             altitude_m, baro_new);
+		  fusion = fusion_update(&fusion_in, dt_s);
 
 		  bool changed = FSM_NewReading(
 			  &fsm, 0, 0, 0, /* h3lis int8 accel: unused by fsm.c's logic */
@@ -305,6 +348,11 @@ int main(void)
 		  telemetry.fsm_state = (uint8_t)FSM_GetState(&fsm);
 		  telemetry.loop_us = loop_us;
 		  telemetry.loop_us_max = loop_us_max;
+		  telemetry.fusion_altitude_m = fusion.altitude;
+		  telemetry.fusion_velocity_mps = fusion.velocity;
+		  telemetry.fusion_accel_vert = fusion.accel_vert;
+		  telemetry.fusion_tilt_deg = fusion.tilt_deg;
+		  telemetry.fusion_flags = FusionFlags(&fusion);
 
 		  if (FSM_GetState(&fsm) != FSM_STATE_LANDED) {
 			  HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_6);
