@@ -172,11 +172,8 @@ int main(void)
 
   HAL_Delay(STARTUP_BEEP_OFF_MS);
 
-  // bench test: starts closed, fully deploy, wait 1s, fully retract
+  // starts at MOTOR_STARTUP_ANGLE_DEG (closed), nothing else moves it at boot
   mtr_init(&airbrake_motor, &htim5, TIM_CHANNEL_1);
-  mtr_set_angle_deg(&airbrake_motor, MOTOR_ANGLE_MIN_DEG);
-  HAL_Delay(4000);
-//  mtr_set_angle_deg(&airbrake_motor, MOTOR_ANGLE_MAX_DEG);
 
   accel.i2c_handle = &hi2c1;
   accel.device_addr = H3LIS_ADDR_HIGH;
@@ -248,10 +245,6 @@ int main(void)
 		  prevTick = timeTick;
 
 		  h3lis_read(&accel, &accelData);
-
-		  ReadAcceleration(&imu, accelXRegHi, accelXRegLow, 0);
-		  ReadAcceleration(&imu, accelYRegHi, accelYRegLow, 1);
-		  ReadAcceleration(&imu, accelZRegHi, accelZRegLow, 2);
 
 		  dps368_get_result(&baro, &tmp_raw, &prs_raw);
 		  temperature_C = tmp_raw / 100.0f;      /* tmp_raw is °C x100 */
