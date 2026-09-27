@@ -50,6 +50,8 @@ typedef struct {
     float    pressure_hPa;
     float    altitude_m;
     uint8_t  fsm_state;
+    uint32_t loop_us;      /* how long the PREVIOUS loop body took */
+    uint32_t loop_us_max;  /* worst loop body since boot, must stay < 20000 */
 } TelemetryRecord_t;
 
 /* USER CODE END PTD */
@@ -91,6 +93,8 @@ W25N_Handle_t nand;
 W25N_Status_t nandStatus; // expected W25N_OK after Verify_ID
 TelemetryRecord_t telemetry;
 
+uint32_t loop_us, loop_us_max; /* loop body timing, see LoopTimer_* */
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -108,6 +112,20 @@ static void MX_TIM5_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+/* Loop timing from the DWT cycle counter, so the worst-case loop time
+ * (sensors + fusion + airbrake + logging) can be checked on the bench. */
+static void LoopTimer_Init(void)
+{
+    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+    DWT->CYCCNT = 0;
+    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+}
+
+static uint32_t LoopTimer_Elapsed_us(uint32_t start_cycles)
+{
+    return (DWT->CYCCNT - start_cycles) / (SystemCoreClock / 1000000u);
+}
+
 static void PrintTelemetryRecord(uint32_t page_addr, const uint8_t *data, uint32_t length)
 {
     (void)length;
@@ -119,7 +137,8 @@ static void PrintTelemetryRecord(uint32_t page_addr, const uint8_t *data, uint32
            rec->imu_accel[0], rec->imu_accel[1], rec->imu_accel[2],
            rec->imu_gyro[0], rec->imu_gyro[1], rec->imu_gyro[2],
            rec->temperature_C, rec->pressure_hPa, rec->altitude_m);
-    printf("  state: %s\r\n", FSM_StateName((FSM_State_t)rec->fsm_state));
+    printf("  state: %s | loop %luus (max %luus)\r\n", FSM_StateName((FSM_State_t)rec->fsm_state),
+           (unsigned long)rec->loop_us, (unsigned long)rec->loop_us_max);
 }
 
 /* USER CODE END 0 */
@@ -224,6 +243,7 @@ int main(void)
 
   }
 
+  LoopTimer_Init();
   uint32_t prevTick = HAL_GetTick();
 
   // reading all the data
@@ -243,6 +263,7 @@ int main(void)
 
 	  if (timeTick - prevTick >= MIN_CONTROL_LOOP_PERIOD_MS) {
 		  prevTick = timeTick;
+		  uint32_t loopStart = DWT->CYCCNT;
 
 		  h3lis_read(&accel, &accelData);
 
@@ -282,6 +303,8 @@ int main(void)
 		  telemetry.pressure_hPa = pressure_hPa;
 		  telemetry.altitude_m = altitude_m;
 		  telemetry.fsm_state = (uint8_t)FSM_GetState(&fsm);
+		  telemetry.loop_us = loop_us;
+		  telemetry.loop_us_max = loop_us_max;
 
 		  if (FSM_GetState(&fsm) != FSM_STATE_LANDED) {
 			  HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_6);
@@ -290,6 +313,11 @@ int main(void)
 
 		  if (nandStatus != W25N_OK) {
 			  printf("NAND write failed at page %lu, status %d\r\n", (unsigned long)nand.log_next_page, nandStatus);
+		  }
+
+		  loop_us = LoopTimer_Elapsed_us(loopStart);
+		  if (loop_us > loop_us_max) {
+			  loop_us_max = loop_us;
 		  }
 	  }
 
