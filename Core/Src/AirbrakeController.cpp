@@ -52,7 +52,8 @@ bool AirbrakeController::configure(const FlightConfig& cfg) {
                     config::kCorrectorGainFraction,
                     config::kSensitivityRefreshTicks,
                     config::kSensitivityProbeDelta);
-    limiter_.init(config::kMaxDeployRate_per_s, config::kDeployMin, config::kDeployMax);
+    limiter_.init(cfg_.deploy_rate_per_s, cfg_.retract_rate_per_s,
+                  config::kDeployMin, config::kDeployMax);
     limiter_.snapTo(config::kNeutral);
     faults_.init(config::kBridgeTicks, config::kRecoveryTicks, config::kDegradedMaxTicks);
 

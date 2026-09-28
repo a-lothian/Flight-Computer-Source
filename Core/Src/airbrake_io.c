@@ -23,6 +23,8 @@ AB_Status ab_io_configure(float launch_elevation_msl_m)
     cfg.target_apogee_agl_m = AB_TARGET_APOGEE_AGL_M;
     cfg.launch_elevation_msl_m = launch_elevation_msl_m;
     cfg.cd_scale = 1.0f;
+    cfg.deploy_rate_per_s = AB_DEPLOY_RATE_PER_S;
+    cfg.retract_rate_per_s = AB_RETRACT_RATE_PER_S;
     return ab_configure(&cfg);
 }
 

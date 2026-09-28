@@ -64,6 +64,9 @@ struct FlightConfig {
     float cd_scale;               // multiplier on every Cd table lookup.
                                   // 1.0 in flight, swept in testing to
                                   // represent CFD uncertainty
+    float deploy_rate_per_s;      // actuator slew while opening, full travel per s
+    float retract_rate_per_s;     // actuator slew while closing. differs from
+                                  // deploy because the brakes are spring loaded
 };
 
 // written once, on the first fault of a flight, then never overwritten.

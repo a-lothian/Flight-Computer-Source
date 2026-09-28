@@ -25,7 +25,7 @@
 extern "C" {
 #endif
 
-#define AB_ABI_VERSION 2
+#define AB_ABI_VERSION 3
 
 //
 // the shared library is build with hidden default visibility so only the
@@ -84,6 +84,8 @@ typedef struct {
     float target_apogee_agl_m;
     float launch_elevation_msl_m;  // density needs MSL, estimator gives AGL
     float cd_scale;                // 1.0f in flight; swept in testing for CFD uncertainty
+    float deploy_rate_per_s;       // full travel per second while opening, 1 / (seconds to open)
+    float retract_rate_per_s;      // full travel per second while closing, 1 / (seconds to close)
 } AB_FlightConfig;
 
 typedef struct {

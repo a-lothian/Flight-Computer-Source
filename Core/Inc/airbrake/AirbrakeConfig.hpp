@@ -30,7 +30,8 @@ inline constexpr float kDefaultTargetApogee_m = 3048.0f; // 10,000 ft AGL
 
 inline constexpr float kDeployMin           = 0.0f;
 inline constexpr float kDeployMax           = 1.0f;
-inline constexpr float kMaxDeployRate_per_s = 1.0f;
+// deploy and retract slew rates are measured per vehicle, so they arrive in
+// FlightConfig rather than living here
 inline constexpr float kNeutral             = 0.0f;      // AURC 11.1.3 neutral state
 
 // predictor ,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
@@ -112,6 +113,8 @@ inline constexpr float kDtMin_s       = 1.0e-4f,  kDtMax_s       = 1.0f;
 inline constexpr float kDtClampMax_s  = 5.0f * kNominalDt_s;
 inline constexpr float kMassMin_kg    = 0.1f,     kMassMax_kg    = 200.0f;
 inline constexpr float kCdScaleMin    = 0.1f,     kCdScaleMax    = 5.0f;
+// a zero rate would freeze the brakes where they are, including open
+inline constexpr float kSlewRateMin_per_s = 0.05f, kSlewRateMax_per_s = 100.0f;
 
 // physics ,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
 

@@ -122,6 +122,22 @@ uint16_t checkConfig(const FlightConfig& c) {
         flags |= FAULT_INPUT_NONFINITE | FAULT_CONFIG_INVALID;
     }
 
+    if (isFinite(c.deploy_rate_per_s)) {
+        if (!(c.deploy_rate_per_s >= config::kSlewRateMin_per_s && c.deploy_rate_per_s <= config::kSlewRateMax_per_s)) {
+            flags |= FAULT_INPUT_RANGE | FAULT_CONFIG_INVALID;
+        }
+    } else {
+        flags |= FAULT_INPUT_NONFINITE | FAULT_CONFIG_INVALID;
+    }
+
+    if (isFinite(c.retract_rate_per_s)) {
+        if (!(c.retract_rate_per_s >= config::kSlewRateMin_per_s && c.retract_rate_per_s <= config::kSlewRateMax_per_s)) {
+            flags |= FAULT_INPUT_RANGE | FAULT_CONFIG_INVALID;
+        }
+    } else {
+        flags |= FAULT_INPUT_NONFINITE | FAULT_CONFIG_INVALID;
+    }
+
     return flags;
 }
 

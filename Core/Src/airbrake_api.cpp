@@ -54,6 +54,8 @@ AB_API AB_Status ab_configure(const AB_FlightConfig* cfg) {
     native.target_apogee_agl_m = cfg->target_apogee_agl_m;
     native.launch_elevation_msl_m = cfg->launch_elevation_msl_m;
     native.cd_scale = cfg->cd_scale;
+    native.deploy_rate_per_s = cfg->deploy_rate_per_s;
+    native.retract_rate_per_s = cfg->retract_rate_per_s;
 
     return g_controller.configure(native) ? AB_OK : AB_ERR_BAD_INPUT;
 }
@@ -126,6 +128,8 @@ AB_API AB_Status ab_fault_snapshot(AB_FaultSnapshot* out) {
     out->config.target_apogee_agl_m = snapshot.config.target_apogee_agl_m;
     out->config.launch_elevation_msl_m = snapshot.config.launch_elevation_msl_m;
     out->config.cd_scale = snapshot.config.cd_scale;
+    out->config.deploy_rate_per_s = snapshot.config.deploy_rate_per_s;
+    out->config.retract_rate_per_s = snapshot.config.retract_rate_per_s;
 
     return AB_OK;
 }

@@ -141,6 +141,16 @@
 
 #define AB_TARGET_APOGEE_AGL_M       3048.0f  // 10,000 ft
 
+/* Airbrake slew rates, in full travel per second (1 / seconds for full
+ * travel). They differ because the brakes are spring loaded, so opening
+ * is slower than closing. The controller uses them as its model of where
+ * the brakes are, so a rate faster than the real mechanism makes it think
+ * the brakes are further out than they are.
+ * UNVERIFIED: 1.0 is a placeholder. Time a full closed -> open and a full
+ * open -> closed sweep under spring load, and set each to 1 / seconds. */
+#define AB_DEPLOY_RATE_PER_S         1.0f
+#define AB_RETRACT_RATE_PER_S        1.0f
+
 /* The brakes only move while the nose is within this angle of vertical.
  * Matches the abort tilt the airbrake harness was tuned with
  * (GatingMirror.java); confirm against the AURC airbrake rules. */
