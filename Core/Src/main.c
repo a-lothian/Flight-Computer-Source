@@ -43,6 +43,8 @@
 
 #include "airbrake_api.h"
 #include "airbrake_io.h"
+
+#include "bench.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -303,6 +305,12 @@ int main(void)
   printf("airbrake: Cd table %s, configure %d, self test %d\r\n",
          ab_cd_table_provenance(), (int)ab_cfg_status, (int)ab_test_status);
 
+#ifdef BENCH_BUILD
+  // before the fusion's first update, so its calibration starts after the servo stops
+  bench_boot_tests(&airbrake_motor, &htim2);
+  uint32_t bench_print_count = 0;
+#endif
+
   LoopTimer_Init();
   uint32_t prevTick = HAL_GetTick();
 
@@ -401,6 +409,13 @@ int main(void)
 		  telemetry.ab_faults = ab_out.fault_flags;
 		  telemetry.ab_mode = ab_out.mode;
 		  telemetry.ab_boot = ab_boot_flags;
+
+#ifdef BENCH_BUILD
+		  if (++bench_print_count >= BENCH_PRINT_EVERY) {
+			  bench_print_count = 0;
+			  PrintTelemetryRecord(nand.log_next_page, (const uint8_t *)&telemetry, sizeof(telemetry));
+		  }
+#endif
 
 		  if (FSM_GetState(&fsm) != FSM_STATE_LANDED) {
 			  HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_6);

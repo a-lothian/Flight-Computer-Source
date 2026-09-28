@@ -105,7 +105,7 @@
 
 /* Buzzer ,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,, */
 
-#define STARTUP_BEEP_COUNT           3
+#define STARTUP_BEEP_COUNT           1
 #define STARTUP_BEEP_ON_MS           100
 #define STARTUP_BEEP_OFF_MS          200
 #define READY_BEEP_MS                500
