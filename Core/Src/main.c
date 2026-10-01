@@ -252,9 +252,24 @@ int main(void)
   LoopTimer_Init();
   uint32_t prevTick = HAL_GetTick();
 
-  // reading all the data
-//  telemetry_print_csv_header();
-//  W25N_Log_Dump(&nand, LOG_DUMP_PAGE_COUNT, &telemetry, sizeof(telemetry), telemetry_print_csv);
+#if LOG_DUMP_AT_BOOT
+#ifndef DEBUG
+#error "LOG_DUMP_AT_BOOT stops the firmware after the dump - it must never be set in a Release (flight) build"
+#endif
+  printf("DUMPING NAND LOG *** BEGIN IN %ims", LOG_DUMP_START_DELAY_MS);
+  // ITM drops every character until a debugger turns SWO on, so wait for
+  // the capture (uv run capture-log in tools/, or CubeIDE's SWV console) to start
+  while (!((ITM->TCR & ITM_TCR_ITMENA_Msk) && (ITM->TER & 1UL))) {
+  }
+  HAL_Delay(LOG_DUMP_START_DELAY_MS);
+  printf("\r\n");
+  telemetry_print_csv_header();
+  W25N_Log_Dump(&nand, LOG_DUMP_PAGE_COUNT, &telemetry, sizeof(telemetry), telemetry_print_csv);
+  printf("# end of log\r\n");
+  // stop here: the main loop would start a new log over the one just read
+  while (1) {
+  }
+#endif
 
   /* USER CODE END 2 */
 
