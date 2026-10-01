@@ -86,7 +86,7 @@ static void bench_slew_timing(Motor_t *servo, TIM_HandleTypeDef *buzzer)
            "AB_RETRACT_RATE_PER_S = 1 / (seconds to close) in config.h\r\n");
 }
 
-static void bench_simulated_coast(Motor_t *servo)
+static void bench_simulated_coast(Motor_t *servo, TIM_HandleTypeDef *buzzer)
 {
     printf("\r\n[bench 3/3] simulated coast - the airbrake controller flies it and drives the servo\r\n");
 
@@ -145,6 +145,7 @@ static void bench_simulated_coast(Motor_t *servo)
 
 void bench_boot_tests(Motor_t *servo, TIM_HandleTypeDef *buzzer)
 {
+
     CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
     DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
 
@@ -153,7 +154,7 @@ void bench_boot_tests(Motor_t *servo, TIM_HandleTypeDef *buzzer)
 
     bench_servo_sweep(servo);
     bench_slew_timing(servo, buzzer);
-    bench_simulated_coast(servo);
+    bench_simulated_coast(servo, buzzer);
 
     printf("\r\n[bench] tests done. Normal firmware from here: keep the board still for 2 s "
            "while the fusion calibrates. Telemetry prints every %u loops.\r\n\r\n",
