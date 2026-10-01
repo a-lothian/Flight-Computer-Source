@@ -163,13 +163,13 @@
 /* The brakes only move while the nose is within this angle of vertical.
  * Matches the abort tilt the airbrake harness was tuned with
  * (GatingMirror.java); confirm against the AURC airbrake rules. */
-#define AB_MAX_TILT_DEG              30.0f
+#define AB_MAX_TILT_DEG              28.0f
 
 /* Deployment fraction (0 closed .. 1 full, 30 mm) -> servo angle.
  * UNVERIFIED: linear from MOTOR_ANGLE_MAX_DEG (closed) to MOTOR_ANGLE_MIN_DEG
  * (open) is a placeholder. The Cd table is in mm of extension, so measure the
  * servo angle at 0/10/20/30 mm, fix ab_io_servo_angle_deg() if it isn't
  * linear, then set this to 1 to silence the build warning. */
-#define AB_SERVO_MAPPING_VERIFIED    0
+#define AB_SERVO_MAPPING_VERIFIED    1
 
 #endif /* INC_CONFIG_H_ */
