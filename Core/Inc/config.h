@@ -98,7 +98,6 @@
 /* Logging ,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,, */
 
 #define NAND_TIMEOUT_MS              100
-#define LOG_DUMP_PAGE_COUNT          100000
 
 /* Log read-back. 1 = at boot, wait for a debugger to start SWV, print the
  * whole log as CSV (tools/: uv run capture-log saves it), then stop there:
@@ -106,6 +105,12 @@
  * Debug builds only - Release refuses to build with it set. */
 #define LOG_DUMP_AT_BOOT             0
 #define LOG_DUMP_START_DELAY_MS      1000 // lets the capture settle before the header
+
+/* Fresh log. Every boot continues the log already on the chip (a reboot
+ * mid-flight adds to it). 1 = at boot, erase the log and stop; then set it
+ * back to 0 and re-flash. Dump the log first - erased is gone.
+ * Debug builds only - Release refuses to build with it set. */
+#define LOG_ERASE_AT_BOOT            0
 
 /* Buzzer ,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,, */
 

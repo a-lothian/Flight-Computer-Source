@@ -220,6 +220,29 @@ int main(void)
 	printf("NAND: failed to clear block protection\r\n");
   }
 
+#if LOG_ERASE_AT_BOOT && LOG_DUMP_AT_BOOT
+#error "set only one of LOG_ERASE_AT_BOOT and LOG_DUMP_AT_BOOT"
+#endif
+#if LOG_ERASE_AT_BOOT
+#ifndef DEBUG
+#error "LOG_ERASE_AT_BOOT erases the log and stops - it must never be set in a Release (flight) build"
+#endif
+  nandStatus = W25N_Log_Erase(&nand, sizeof(TelemetryRecord_t));
+  printf("NAND: log erased, status %d. Set LOG_ERASE_AT_BOOT to 0 and re-flash\r\n", nandStatus);
+  // stop here, so a board left with this build can't erase a flight log
+  while (1) {
+  }
+#endif
+
+  // carry on after the log already on the chip, so a reboot (even
+  // mid-flight) adds to it instead of writing over it
+  nandStatus = W25N_Log_Resume(&nand, sizeof(TelemetryRecord_t));
+  if (nandStatus != W25N_OK) {
+	printf("NAND: can't find the end of the log, status %d - not logging\r\n", nandStatus);
+  } else {
+	printf("NAND: log continues at page %lu\r\n", (unsigned long)nand.log_next_page);
+  }
+
   FSM_t fsm;
   FSM_Init(&fsm);
 
@@ -263,10 +286,13 @@ int main(void)
   }
   HAL_Delay(LOG_DUMP_START_DELAY_MS);
   printf("\r\n");
+  // log size first, so the capture can show progress
+  printf("# log pages=%lu records_per_page=%lu\r\n", (unsigned long)nand.log_next_page,
+         (unsigned long)(W25N_PAGE_SIZE_BYTES / sizeof(TelemetryRecord_t)));
   telemetry_print_csv_header();
-  W25N_Log_Dump(&nand, LOG_DUMP_PAGE_COUNT, &telemetry, sizeof(telemetry), telemetry_print_csv);
+  W25N_Log_Dump(&nand, nand.log_next_page, &telemetry, sizeof(telemetry), telemetry_print_csv);
   printf("# end of log\r\n");
-  // stop here: the main loop would start a new log over the one just read
+  // stop here, so the dump build never adds to the log it just read
   while (1) {
   }
 #endif

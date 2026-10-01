@@ -145,8 +145,8 @@ W25N_Status_t W25N_Page_Program(W25N_Handle_t *dev, uint32_t page_addr, uint16_t
 W25N_Status_t W25N_Erase_Block(W25N_Handle_t *dev, uint32_t page_addr);
 
 /* --- simple sequential logger ---
- * Packs fixed-size records back to back into each page, starting at
- * page 0 and advancing automatically (tracked in dev->log_next_page and
+ * Packs fixed-size records back to back into each page, starting where
+ * the log on the chip ends (W25N_Log_Resume) and advancing automatically (tracked in dev->log_next_page and
  * dev->log_next_column). Deliberately generic - it just writes/reads
  * whatever buffer you give it, so it works for any record type without
  * this driver needing to know anything about what's actually being
@@ -166,13 +166,28 @@ W25N_Status_t W25N_Erase_Block(W25N_Handle_t *dev, uint32_t page_addr);
  *
  * NAND cells must be erased (all bits -> 1) before they can be
  * programmed, and erase only works a whole 64-page block at a time, so
- * W25N_Log_Write erases lazily: only the block about to be written to,
- * and only when its first page is started - rather than erasing the
- * entire chip up front (2048 blocks, would take a while).
+ * W25N_Log_Write erases lazily, one block ahead: starting a block erases
+ * the one after it - rather than erasing the entire chip up front (2048
+ * blocks, would take a while). So the block after the end of the log is
+ * always erased, which is what lets W25N_Log_Resume find the end.
  *
  * Every call to W25N_Log_Write for one log must use the same length.
  */
 W25N_Status_t W25N_Log_Write(W25N_Handle_t *dev, const void *record, uint32_t length);
+
+/* Call once at boot, before W25N_Log_Write: finds the end of the log
+ * already on the chip and continues after it, on the next page, so a
+ * reboot (even mid-flight) adds to the log instead of writing over it.
+ * Afterwards dev->log_next_page is the number of pages the log uses. If
+ * the chip can't be read, nothing will be written (W25N_Log_Write reports
+ * the log as full) and the error is returned. A few page reads: one per
+ * block used, plus a binary search inside the last one. */
+W25N_Status_t W25N_Log_Resume(W25N_Handle_t *dev, uint32_t length);
+
+/* Start a fresh log: erase every block the log uses (plus the one after
+ * it) and continue from page 0. Erasing carries on past a block that
+ * fails; the first failure is returned. */
+W25N_Status_t W25N_Log_Erase(W25N_Handle_t *dev, uint32_t length);
 
 /* Program a partly filled page now, so the records in the chip's buffer
  * survive a power loss. The next W25N_Log_Write starts a new page. Does
@@ -189,8 +204,10 @@ W25N_Status_t W25N_Log_Read(W25N_Handle_t *dev, uint32_t page_addr, uint32_t slo
 typedef void (*W25N_Log_Dump_Cb)(uint32_t page_addr, const uint8_t *data, uint32_t length);
 
 /* Reads back the records in pages [0, page_count) and calls print_fn for
- * each one, stopping at the first record that is still erased (all 0xFF),
- * which is the end of the log. record_buf must be a caller-supplied
+ * each one. A page ends at its first erased record (all 0xFF) - a partly
+ * filled page, left by a flush or a reboot - and the log ends at a page
+ * whose first record is erased. After W25N_Log_Resume, pass
+ * dev->log_next_page as page_count. record_buf must be a caller-supplied
  * buffer at least `length` bytes - this driver never allocates a
  * page-sized buffer itself (2048 bytes would overflow a small embedded
  * stack), so reuse a same-sized variable you already have (e.g. your

@@ -362,9 +362,20 @@ W25N_Status_t W25N_Log_Write(W25N_Handle_t *dev, const void *record, uint32_t le
         return W25N_ERROR;
     }
 
+    /* Starting a block: erase the NEXT one, so there is always an erased
+     * block after the end of the log for W25N_Log_Resume to find. The
+     * block being started was erased the same way when the one before it
+     * was started; page 0 has no block before it, so erase its own. */
     if (dev->log_next_column == 0 && (dev->log_next_page % W25N_PAGES_PER_BLOCK) == 0) {
-        status = W25N_Erase_Block(dev, dev->log_next_page);
-        if (status != W25N_OK) return status;
+        if (dev->log_next_page == 0) {
+            status = W25N_Erase_Block(dev, 0);
+            if (status != W25N_OK) return status;
+        }
+        uint32_t ahead = dev->log_next_page + W25N_PAGES_PER_BLOCK;
+        if (ahead <= W25N_MAX_PAGE_ADDR) {
+            status = W25N_Erase_Block(dev, ahead);
+            if (status != W25N_OK) return status;
+        }
     }
 
     status = W25N_Write_Enable(dev);
@@ -417,6 +428,100 @@ static int W25N_Is_Erased(const uint8_t *data, uint32_t length)
     return 1;
 }
 
+/* Has page_addr been written? Looks at its first record only, in small
+ * chunks so no record-sized buffer is needed. A page the ECC can't correct
+ * counts as written: something was programmed there. */
+static W25N_Status_t W25N_Page_Written(W25N_Handle_t *dev, uint32_t page_addr, uint32_t length, int *written)
+{
+    W25N_Status_t status = W25N_Page_To_Buffer(dev, page_addr);
+    if (status == W25N_ECC_FAIL) {
+        *written = 1;
+        return W25N_OK;
+    }
+    if (status != W25N_OK && status != W25N_ECC_WARN) return status;
+
+    uint8_t chunk[32];
+    for (uint32_t done = 0; done < length; done += sizeof(chunk)) {
+        uint32_t n = (length - done < sizeof(chunk)) ? length - done : sizeof(chunk);
+        status = W25N_Read_Data(dev, (uint16_t)done, chunk, n);
+        if (status != W25N_OK) return status;
+        if (!W25N_Is_Erased(chunk, n)) {
+            *written = 1;
+            return W25N_OK;
+        }
+    }
+    *written = 0;
+    return W25N_OK;
+}
+
+W25N_Status_t W25N_Log_Resume(W25N_Handle_t *dev, uint32_t length)
+{
+    W25N_Status_t status;
+    int written = 0;
+    uint32_t b;
+
+    dev->log_next_column = 0;
+    if (W25N_Records_Per_Page(length) == 0) {
+        dev->log_next_page = W25N_MAX_PAGE_ADDR + 1;
+        return W25N_ERROR;
+    }
+
+    /* 1. The first block whose first page is erased comes after the end of
+     *    the log: the log is written from page 0 without gaps, and the
+     *    block after its end is always erased (see W25N_Log_Write). Old
+     *    data further on is never reached. */
+    for (b = 0; b < W25N_BLOCK_COUNT; b++) {
+        status = W25N_Page_Written(dev, b * W25N_PAGES_PER_BLOCK, length, &written);
+        if (status != W25N_OK) goto fail;
+        if (!written) break;
+    }
+    if (b == 0) {
+        dev->log_next_page = 0;          /* empty log */
+        return W25N_OK;
+    }
+
+    /* 2. The end is in block b-1, whose pages are written in order after
+     *    it was erased: binary search for its first erased page. lo is
+     *    always written, hi is always erased (or past the last page). */
+    uint32_t lo = (b - 1) * W25N_PAGES_PER_BLOCK;
+    uint32_t hi = b * W25N_PAGES_PER_BLOCK;
+    while (hi - lo > 1) {
+        uint32_t mid = lo + (hi - lo) / 2;
+        status = W25N_Page_Written(dev, mid, length, &written);
+        if (status != W25N_OK) goto fail;
+        if (written) lo = mid; else hi = mid;
+    }
+
+    /* continue on the next page: a programmed page can't be added to */
+    dev->log_next_page = hi;
+    return W25N_OK;
+
+fail:
+    /* Can't tell where the log ends, so don't write at all rather than
+     * risk writing over it. W25N_Log_Write reports the log as full. */
+    dev->log_next_page = W25N_MAX_PAGE_ADDR + 1;
+    return status;
+}
+
+W25N_Status_t W25N_Log_Erase(W25N_Handle_t *dev, uint32_t length)
+{
+    W25N_Status_t status = W25N_Log_Resume(dev, length);
+    if (status != W25N_OK) return status;
+
+    /* every block the log has used, plus the erased one after it */
+    uint32_t blocks = (dev->log_next_page + W25N_PAGES_PER_BLOCK - 1) / W25N_PAGES_PER_BLOCK + 1;
+    if (blocks > W25N_BLOCK_COUNT) blocks = W25N_BLOCK_COUNT;
+
+    W25N_Status_t first_fail = W25N_OK;
+    for (uint32_t b = 0; b < blocks; b++) {
+        status = W25N_Erase_Block(dev, b * W25N_PAGES_PER_BLOCK);
+        if (status != W25N_OK && first_fail == W25N_OK) first_fail = status;
+    }
+    dev->log_next_page = 0;
+    dev->log_next_column = 0;
+    return first_fail;
+}
+
 void W25N_Log_Dump(W25N_Handle_t *dev, uint32_t page_count, void *record_buf, uint32_t length, W25N_Log_Dump_Cb print_fn)
 {
     uint32_t per_page = W25N_Records_Per_Page(length);
@@ -432,7 +537,8 @@ void W25N_Log_Dump(W25N_Handle_t *dev, uint32_t page_count, void *record_buf, ui
                 continue;
             }
             if (W25N_Is_Erased((const uint8_t *)record_buf, length)) {
-                return; /* never written: the end of the log */
+                if (slot == 0) return; /* page never written: the end of the log */
+                break;                 /* partly filled page (flush or reboot) */
             }
             print_fn(p, (const uint8_t *)record_buf, length);
         }
