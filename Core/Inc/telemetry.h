@@ -67,4 +67,11 @@ void telemetry_fill(TelemetryRecord_t *rec, uint32_t timestamp_ms,
  * to W25N_Log_Dump; page_addr is only used as a label. */
 void telemetry_print(uint32_t page_addr, const uint8_t *data, uint32_t length);
 
+/* CSV for reading a log back: print the header line once, then pass
+ * telemetry_print_csv to W25N_Log_Dump to print one row per record.
+ * Columns are in record order with units in the names; page_addr is the
+ * first column. Flags and faults are decimal so they import as numbers. */
+void telemetry_print_csv_header(void);
+void telemetry_print_csv(uint32_t page_addr, const uint8_t *data, uint32_t length);
+
 #endif /* INC_TELEMETRY_H_ */

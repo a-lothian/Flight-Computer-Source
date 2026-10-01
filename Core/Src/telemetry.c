@@ -70,3 +70,37 @@ void telemetry_print(uint32_t page_addr, const uint8_t *data, uint32_t length)
     printf("  airbrake: cmd %.3f apogee %.1fm mode %u faults 0x%04x boot 0x%02x\r\n",
            rec->ab_cmd, rec->ab_pred_apogee_m, rec->ab_mode, rec->ab_faults, rec->ab_boot);
 }
+
+/* Keep the header and the row format in step: one column per field. */
+void telemetry_print_csv_header(void)
+{
+    printf("page,timestamp_ms,h3lis_x,h3lis_y,h3lis_z,"
+           "imu_ax_mg,imu_ay_mg,imu_az_mg,imu_gx_mdps,imu_gy_mdps,imu_gz_mdps,"
+           "temperature_C,pressure_hPa,altitude_m,fsm_state,fsm_state_name,"
+           "loop_us,loop_us_max,"
+           "fusion_altitude_m,fusion_velocity_mps,fusion_accel_vert_mps2,fusion_tilt_deg,fusion_flags,"
+           "ab_cmd,ab_pred_apogee_m,ab_faults,ab_mode,ab_boot\r\n");
+}
+
+void telemetry_print_csv(uint32_t page_addr, const uint8_t *data, uint32_t length)
+{
+    (void)length;
+    const TelemetryRecord_t *rec = (const TelemetryRecord_t *)data;
+
+    printf("%lu,%lu,%d,%d,%d,"
+           "%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,"
+           "%.2f,%.2f,%.2f,%u,%s,"
+           "%lu,%lu,"
+           "%.3f,%.3f,%.3f,%.2f,%u,"
+           "%.4f,%.1f,%u,%u,%u\r\n",
+           (unsigned long)page_addr, (unsigned long)rec->timestamp_ms,
+           rec->h3lis_accel[0], rec->h3lis_accel[1], rec->h3lis_accel[2],
+           rec->imu_accel[0], rec->imu_accel[1], rec->imu_accel[2],
+           rec->imu_gyro[0], rec->imu_gyro[1], rec->imu_gyro[2],
+           rec->temperature_C, rec->pressure_hPa, rec->altitude_m,
+           rec->fsm_state, FSM_StateName((FSM_State_t)rec->fsm_state),
+           (unsigned long)rec->loop_us, (unsigned long)rec->loop_us_max,
+           rec->fusion_altitude_m, rec->fusion_velocity_mps, rec->fusion_accel_vert,
+           rec->fusion_tilt_deg, rec->fusion_flags,
+           rec->ab_cmd, rec->ab_pred_apogee_m, rec->ab_faults, rec->ab_mode, rec->ab_boot);
+}

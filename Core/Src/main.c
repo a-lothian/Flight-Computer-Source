@@ -253,7 +253,8 @@ int main(void)
   uint32_t prevTick = HAL_GetTick();
 
   // reading all the data
-//  W25N_Log_Dump(&nand, LOG_DUMP_PAGE_COUNT, &telemetry, sizeof(telemetry), telemetry_print);
+//  telemetry_print_csv_header();
+//  W25N_Log_Dump(&nand, LOG_DUMP_PAGE_COUNT, &telemetry, sizeof(telemetry), telemetry_print_csv);
 
   /* USER CODE END 2 */
 
