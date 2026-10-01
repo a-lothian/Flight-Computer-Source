@@ -249,8 +249,9 @@ W25N_Status_t W25N_Block_Erase(W25N_Handle_t *dev, uint32_t page_addr)
 
 /* ---------------- high level helpers ---------------- */
 
-W25N_Status_t W25N_Page_Read(W25N_Handle_t *dev, uint32_t page_addr, uint16_t column_addr,
-                              uint8_t *buffer, uint32_t length)
+/* Page Data Read into the chip's buffer, wait for it, and report the ECC
+ * result: W25N_OK, W25N_ECC_WARN (corrected), or W25N_ECC_FAIL. */
+static W25N_Status_t W25N_Page_To_Buffer(W25N_Handle_t *dev, uint32_t page_addr)
 {
     W25N_Status_t status;
     uint8_t sr3 = 0;
@@ -267,16 +268,43 @@ W25N_Status_t W25N_Page_Read(W25N_Handle_t *dev, uint32_t page_addr, uint16_t co
         /* ECC1:ECC0 = 10 -> uncorrectable error, data is not trustworthy */
         return W25N_ECC_FAIL;
     }
-
-    /* 3. internal buffer -> MCU */
-    status = W25N_Read_Data(dev, column_addr, buffer, length);
-    if (status != W25N_OK) return status;
-
     if ((sr3 & SR3_ECC1) && (sr3 & SR3_ECC0)) {
         /* ECC1:ECC0 = 11 -> corrected, but bit errors are piling up */
         return W25N_ECC_WARN;
     }
+    return W25N_OK;
+}
 
+W25N_Status_t W25N_Page_Read(W25N_Handle_t *dev, uint32_t page_addr, uint16_t column_addr,
+                              uint8_t *buffer, uint32_t length)
+{
+    W25N_Status_t ecc = W25N_Page_To_Buffer(dev, page_addr);
+    if (ecc != W25N_OK && ecc != W25N_ECC_WARN) return ecc;
+
+    /* 3. internal buffer -> MCU */
+    W25N_Status_t status = W25N_Read_Data(dev, column_addr, buffer, length);
+    if (status != W25N_OK) return status;
+
+    return ecc;
+}
+
+/* Program the chip's buffer, as already loaded, into page_addr. */
+static W25N_Status_t W25N_Program_Buffer(W25N_Handle_t *dev, uint32_t page_addr)
+{
+    W25N_Status_t status;
+    uint8_t sr3 = 0;
+
+    status = W25N_Write_Enable(dev);
+    if (status != W25N_OK) return status;
+
+    /* internal buffer -> NAND array */
+    status = W25N_Program_Execute(dev, page_addr);
+    if (status != W25N_OK) return status;
+
+    status = W25N_Wait_Busy(dev, dev->timeout, &sr3);
+    if (status != W25N_OK) return status;
+
+    if (sr3 & SR3_P_FAIL) return W25N_PROGRAM_FAIL;
     return W25N_OK;
 }
 
@@ -284,7 +312,6 @@ W25N_Status_t W25N_Page_Program(W25N_Handle_t *dev, uint32_t page_addr, uint16_t
                                  uint8_t *data, uint32_t length)
 {
     W25N_Status_t status;
-    uint8_t sr3 = 0;
 
     status = W25N_Write_Enable(dev);
     if (status != W25N_OK) return status;
@@ -294,14 +321,7 @@ W25N_Status_t W25N_Page_Program(W25N_Handle_t *dev, uint32_t page_addr, uint16_t
     if (status != W25N_OK) return status;
 
     /* 2. internal buffer -> NAND array */
-    status = W25N_Program_Execute(dev, page_addr);
-    if (status != W25N_OK) return status;
-
-    status = W25N_Wait_Busy(dev, dev->timeout, &sr3);
-    if (status != W25N_OK) return status;
-
-    if (sr3 & SR3_P_FAIL) return W25N_PROGRAM_FAIL;
-    return W25N_OK;
+    return W25N_Program_Buffer(dev, page_addr);
 }
 
 W25N_Status_t W25N_Erase_Block(W25N_Handle_t *dev, uint32_t page_addr)
@@ -324,9 +344,16 @@ W25N_Status_t W25N_Erase_Block(W25N_Handle_t *dev, uint32_t page_addr)
 
 /* ---------------- simple sequential logger ---------------- */
 
+static uint32_t W25N_Records_Per_Page(uint32_t length)
+{
+    return (length == 0 || length > W25N_PAGE_SIZE_BYTES) ? 0 : W25N_PAGE_SIZE_BYTES / length;
+}
+
 W25N_Status_t W25N_Log_Write(W25N_Handle_t *dev, const void *record, uint32_t length)
 {
     W25N_Status_t status;
+
+    if (W25N_Records_Per_Page(length) == 0) return W25N_ERROR;
 
     if (dev->log_next_page > W25N_MAX_PAGE_ADDR) {
         /* Log is full. Not auto-wrapping to page 0, since that would
@@ -335,29 +362,79 @@ W25N_Status_t W25N_Log_Write(W25N_Handle_t *dev, const void *record, uint32_t le
         return W25N_ERROR;
     }
 
-    if ((dev->log_next_page % W25N_PAGES_PER_BLOCK) == 0) {
+    if (dev->log_next_column == 0 && (dev->log_next_page % W25N_PAGES_PER_BLOCK) == 0) {
         status = W25N_Erase_Block(dev, dev->log_next_page);
         if (status != W25N_OK) return status;
     }
 
-    status = W25N_Page_Program(dev, dev->log_next_page, 0, (uint8_t *)record, length);
+    status = W25N_Write_Enable(dev);
+    if (status != W25N_OK) return status;
+
+    /* The first record of a page resets the rest of the buffer to 0xFF,
+     * later ones are added at their offset without touching the rest. */
+    if (dev->log_next_column == 0) {
+        status = W25N_Load_Program_Data(dev, 0, (uint8_t *)record, length);
+    } else {
+        status = W25N_Random_Load_Program_Data(dev, dev->log_next_column, (uint8_t *)record, length);
+    }
+    if (status != W25N_OK) return status;
+    dev->log_next_column += (uint16_t)length;
+
+    /* program the page once the next record would not fit */
+    if (dev->log_next_column + length > W25N_PAGE_SIZE_BYTES) {
+        return W25N_Log_Flush(dev);
+    }
+    return W25N_OK;
+}
+
+W25N_Status_t W25N_Log_Flush(W25N_Handle_t *dev)
+{
+    if (dev->log_next_column == 0) return W25N_OK;
+
+    W25N_Status_t status = W25N_Program_Buffer(dev, dev->log_next_page);
+
+    /* The next record starts a fresh page either way. On a failure the
+     * page is not advanced, so the next page is programmed to the same
+     * address again (as the one-record-per-page logger did). */
+    dev->log_next_column = 0;
     if (status == W25N_OK) {
         dev->log_next_page++;
     }
     return status;
 }
 
-W25N_Status_t W25N_Log_Read(W25N_Handle_t *dev, uint32_t page_addr, void *record, uint32_t length)
+W25N_Status_t W25N_Log_Read(W25N_Handle_t *dev, uint32_t page_addr, uint32_t slot, void *record, uint32_t length)
 {
-    return W25N_Page_Read(dev, page_addr, 0, (uint8_t *)record, length);
+    if (slot >= W25N_Records_Per_Page(length)) return W25N_ERROR;
+    return W25N_Page_Read(dev, page_addr, (uint16_t)(slot * length), (uint8_t *)record, length);
+}
+
+static int W25N_Is_Erased(const uint8_t *data, uint32_t length)
+{
+    for (uint32_t i = 0; i < length; i++) {
+        if (data[i] != 0xFF) return 0;
+    }
+    return 1;
 }
 
 void W25N_Log_Dump(W25N_Handle_t *dev, uint32_t page_count, void *record_buf, uint32_t length, W25N_Log_Dump_Cb print_fn)
 {
+    uint32_t per_page = W25N_Records_Per_Page(length);
+
     for (uint32_t p = 0; p < page_count; p++) {
-        if (W25N_Log_Read(dev, p, record_buf, length) != W25N_OK) {
+        /* one array read per page, then each record straight from the buffer */
+        W25N_Status_t ecc = W25N_Page_To_Buffer(dev, p);
+        if (ecc != W25N_OK && ecc != W25N_ECC_WARN) {
             continue; /* extend with a status-aware callback variant if per-page error reporting is needed */
         }
-        print_fn(p, (const uint8_t *)record_buf, length);
+        for (uint32_t slot = 0; slot < per_page; slot++) {
+            if (W25N_Read_Data(dev, (uint16_t)(slot * length), (uint8_t *)record_buf, length) != W25N_OK) {
+                continue;
+            }
+            if (W25N_Is_Erased((const uint8_t *)record_buf, length)) {
+                return; /* never written: the end of the log */
+            }
+            print_fn(p, (const uint8_t *)record_buf, length);
+        }
     }
 }

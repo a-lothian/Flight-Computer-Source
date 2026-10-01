@@ -95,11 +95,13 @@ typedef struct {
     uint16_t           cs_pin;
     uint32_t           timeout;
 
-    /* Sequential logger state (see W25N_Log_Write/Read/Dump below).
+    /* Sequential logger state (see W25N_Log_Write/Flush/Dump below).
      * Zero-initialised automatically for a statically-declared handle;
-     * reset to 0 explicitly if you want to start a fresh log after
+     * reset both to 0 explicitly if you want to start a fresh log after
      * erasing the chip. */
-    uint32_t           log_next_page;
+    uint32_t           log_next_page;    /* page the chip's buffer will be programmed to */
+    uint16_t           log_next_column;  /* byte offset of the next record in that page;
+                                            0 = nothing loaded into the buffer yet */
 } W25N_Handle_t;
 
 /* --- lifecycle / identification --- */
@@ -143,32 +145,56 @@ W25N_Status_t W25N_Page_Program(W25N_Handle_t *dev, uint32_t page_addr, uint16_t
 W25N_Status_t W25N_Erase_Block(W25N_Handle_t *dev, uint32_t page_addr);
 
 /* --- simple sequential logger ---
- * Writes one fixed-size record per page, starting at page 0 and
- * advancing automatically (tracked in dev->log_next_page). Deliberately
- * generic - it just writes/reads whatever buffer you give it, so it
- * works for any record type without this driver needing to know
- * anything about what's actually being logged.
+ * Packs fixed-size records back to back into each page, starting at
+ * page 0 and advancing automatically (tracked in dev->log_next_page and
+ * dev->log_next_column). Deliberately generic - it just writes/reads
+ * whatever buffer you give it, so it works for any record type without
+ * this driver needing to know anything about what's actually being
+ * logged. A page holds W25N_PAGE_SIZE_BYTES / length records; the bytes
+ * left over at the end of each page stay 0xFF.
+ *
+ * Records are collected in the chip's own page buffer, not in MCU RAM:
+ * the first record of a page is loaded with Load Program Data (which
+ * also resets the rest of the buffer to 0xFF), each later one is added
+ * at its offset with Random Load Program Data (which leaves the rest of
+ * the buffer alone), and the page is programmed once, when the next
+ * record would not fit. So each call only sends one record over SPI,
+ * and the slow program only happens once per page. Records still in the
+ * buffer are lost if power is lost - call W25N_Log_Flush to program a
+ * partly filled page. Don't read from the chip while logging: a read
+ * goes through the same buffer and would overwrite the waiting records.
  *
  * NAND cells must be erased (all bits -> 1) before they can be
  * programmed, and erase only works a whole 64-page block at a time, so
  * W25N_Log_Write erases lazily: only the block about to be written to,
- * and only the first time a page within it is used - rather than
- * erasing the entire chip up front (2048 blocks, would take a while).
+ * and only when its first page is started - rather than erasing the
+ * entire chip up front (2048 blocks, would take a while).
+ *
+ * Every call to W25N_Log_Write for one log must use the same length.
  */
 W25N_Status_t W25N_Log_Write(W25N_Handle_t *dev, const void *record, uint32_t length);
-W25N_Status_t W25N_Log_Read(W25N_Handle_t *dev, uint32_t page_addr, void *record, uint32_t length);
 
-/* Callback used by W25N_Log_Dump for each page: page_addr is which page
+/* Program a partly filled page now, so the records in the chip's buffer
+ * survive a power loss. The next W25N_Log_Write starts a new page. Does
+ * nothing if no records are waiting. */
+W25N_Status_t W25N_Log_Flush(W25N_Handle_t *dev);
+
+/* Read record number `slot` (0 = first) from page page_addr. */
+W25N_Status_t W25N_Log_Read(W25N_Handle_t *dev, uint32_t page_addr, uint32_t slot, void *record, uint32_t length);
+
+/* Callback used by W25N_Log_Dump for each record: page_addr is which page
  * it came from, data/length is the raw record read back. Cast data to
  * your actual record type and format/print it however you like - this
  * keeps the driver itself free of any knowledge of your record layout. */
 typedef void (*W25N_Log_Dump_Cb)(uint32_t page_addr, const uint8_t *data, uint32_t length);
 
-/* Reads back pages [0, page_count) and calls print_fn for each one.
- * record_buf must be a caller-supplied buffer at least `length` bytes -
- * this driver never allocates a page-sized buffer itself (2048 bytes
- * would overflow a small embedded stack), so reuse a same-sized
- * variable you already have (e.g. your record struct) as scratch space. */
+/* Reads back the records in pages [0, page_count) and calls print_fn for
+ * each one, stopping at the first record that is still erased (all 0xFF),
+ * which is the end of the log. record_buf must be a caller-supplied
+ * buffer at least `length` bytes - this driver never allocates a
+ * page-sized buffer itself (2048 bytes would overflow a small embedded
+ * stack), so reuse a same-sized variable you already have (e.g. your
+ * record struct) as scratch space. */
 void W25N_Log_Dump(W25N_Handle_t *dev, uint32_t page_count, void *record_buf, uint32_t length, W25N_Log_Dump_Cb print_fn);
 
 #endif

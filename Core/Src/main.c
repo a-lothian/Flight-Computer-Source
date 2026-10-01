@@ -337,6 +337,10 @@ int main(void)
 		  if (FSM_GetState(&fsm) != FSM_STATE_LANDED) {
 			  HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_6);
 			  nandStatus = W25N_Log_Write(&nand, &telemetry, sizeof(telemetry));
+		  } else {
+			  // records wait in the NAND chip's page buffer until a page is full,
+			  // so program the last, partly filled page (a no-op once done)
+			  nandStatus = W25N_Log_Flush(&nand);
 		  }
 
 		  if (nandStatus != W25N_OK) {
