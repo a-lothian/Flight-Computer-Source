@@ -45,45 +45,12 @@
 #include "airbrake_io.h"
 
 #include "bench.h"
+
+#include "telemetry.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-typedef struct {
-    uint32_t timestamp_ms;
-    int8_t   h3lis_accel[3];
-    float    imu_accel[3];
-    float    imu_gyro[3];
-    float    temperature_C;
-    float    pressure_hPa;
-    float    altitude_m;
-    uint8_t  fsm_state;
-    uint32_t loop_us;      /* how long the PREVIOUS loop body took */
-    uint32_t loop_us_max;  /* worst loop body since boot, must stay < 20000 */
-    float    fusion_altitude_m;   /* above the pad */
-    float    fusion_velocity_mps; /* vertical, +up */
-    float    fusion_accel_vert;   /* m/s^2, gravity removed, +up */
-    float    fusion_tilt_deg;     /* nose from vertical */
-    uint8_t  fusion_flags;        /* FUSION_FLAG_* bits */
-    float    ab_cmd;              /* deployment command, 0 closed .. 1 full */
-    float    ab_pred_apogee_m;    /* predicted apogee AGL, 0 while inhibited */
-    uint16_t ab_faults;           /* sticky AB_FAULT_* bits */
-    uint8_t  ab_mode;             /* AB_Mode */
-    uint8_t  ab_boot;             /* AB_BOOT_* bits */
-} TelemetryRecord_t;
-
-/* fusion_flags bits in the telemetry record */
-#define FUSION_FLAG_READY     (1u << 0)
-#define FUSION_FLAG_IN_FLIGHT (1u << 1)
-#define FUSION_FLAG_DESCENT   (1u << 2)
-#define FUSION_FLAG_BARO_OK   (1u << 3)
-#define FUSION_FLAG_HIGH_G    (1u << 4)
-
-/* ab_boot bits in the telemetry record */
-#define AB_BOOT_CONFIGURED    (1u << 0) /* ab_configure() accepted the config at boot */
-#define AB_BOOT_SELF_TEST_OK  (1u << 1) /* ab_self_test() passed at boot */
-#define AB_BOOT_PAD_ELEVATION (1u << 2) /* reconfigured with the pad elevation at launch */
-
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -159,35 +126,6 @@ static void LoopTimer_Init(void)
 static uint32_t LoopTimer_Elapsed_us(uint32_t start_cycles)
 {
     return (DWT->CYCCNT - start_cycles) / (SystemCoreClock / 1000000u);
-}
-
-static void PrintTelemetryRecord(uint32_t page_addr, const uint8_t *data, uint32_t length)
-{
-    (void)length;
-    const TelemetryRecord_t *rec = (const TelemetryRecord_t *)data;
-
-    printf("page %lu | t=%lums | h3lis(%d,%d,%d) | imu_a(%.2f,%.2f,%.2f) mg | imu_g(%.2f,%.2f,%.2f) mdps | %.2fC %.2fhPa %.2fm\r\n",
-           (unsigned long)page_addr, (unsigned long)rec->timestamp_ms,
-           rec->h3lis_accel[0], rec->h3lis_accel[1], rec->h3lis_accel[2],
-           rec->imu_accel[0], rec->imu_accel[1], rec->imu_accel[2],
-           rec->imu_gyro[0], rec->imu_gyro[1], rec->imu_gyro[2],
-           rec->temperature_C, rec->pressure_hPa, rec->altitude_m);
-    printf("  state: %s | loop %luus (max %luus)\r\n", FSM_StateName((FSM_State_t)rec->fsm_state),
-           (unsigned long)rec->loop_us, (unsigned long)rec->loop_us_max);
-    printf("  fusion: alt %.1fm vel %.1fm/s acc %.2fm/s2 tilt %.1fdeg flags 0x%02x\r\n",
-           rec->fusion_altitude_m, rec->fusion_velocity_mps, rec->fusion_accel_vert,
-           rec->fusion_tilt_deg, rec->fusion_flags);
-    printf("  airbrake: cmd %.3f apogee %.1fm mode %u faults 0x%04x boot 0x%02x\r\n",
-           rec->ab_cmd, rec->ab_pred_apogee_m, rec->ab_mode, rec->ab_faults, rec->ab_boot);
-}
-
-static uint8_t FusionFlags(const FusionOutput *f)
-{
-    return (uint8_t)((f->ready     ? FUSION_FLAG_READY     : 0u) |
-                     (f->in_flight ? FUSION_FLAG_IN_FLIGHT : 0u) |
-                     (f->descent   ? FUSION_FLAG_DESCENT   : 0u) |
-                     (f->baro_ok   ? FUSION_FLAG_BARO_OK   : 0u) |
-                     (f->high_g    ? FUSION_FLAG_HIGH_G    : 0u));
 }
 
 /* USER CODE END 0 */
@@ -315,7 +253,7 @@ int main(void)
   uint32_t prevTick = HAL_GetTick();
 
   // reading all the data
-//  W25N_Log_Dump(&nand, LOG_DUMP_PAGE_COUNT, &telemetry, sizeof(telemetry), PrintTelemetryRecord);
+//  W25N_Log_Dump(&nand, LOG_DUMP_PAGE_COUNT, &telemetry, sizeof(telemetry), telemetry_print);
 
   /* USER CODE END 2 */
 
@@ -384,37 +322,15 @@ int main(void)
 //
 //		  printf("state: %s\r\n", FSM_StateName(FSM_GetState(&fsm)));
 
-		  telemetry.timestamp_ms = timeTick;
-		  telemetry.h3lis_accel[0] = accelData.accel_x;
-		  telemetry.h3lis_accel[1] = accelData.accel_y;
-		  telemetry.h3lis_accel[2] = accelData.accel_z;
-		  telemetry.imu_accel[0] = imu.acceleration[0];
-		  telemetry.imu_accel[1] = imu.acceleration[1];
-		  telemetry.imu_accel[2] = imu.acceleration[2];
-		  telemetry.imu_gyro[0] = imu.gyro[0];
-		  telemetry.imu_gyro[1] = imu.gyro[1];
-		  telemetry.imu_gyro[2] = imu.gyro[2];
-		  telemetry.temperature_C = temperature_C;
-		  telemetry.pressure_hPa = pressure_hPa;
-		  telemetry.altitude_m = altitude_m;
-		  telemetry.fsm_state = (uint8_t)FSM_GetState(&fsm);
-		  telemetry.loop_us = loop_us;
-		  telemetry.loop_us_max = loop_us_max;
-		  telemetry.fusion_altitude_m = fusion.altitude;
-		  telemetry.fusion_velocity_mps = fusion.velocity;
-		  telemetry.fusion_accel_vert = fusion.accel_vert;
-		  telemetry.fusion_tilt_deg = fusion.tilt_deg;
-		  telemetry.fusion_flags = FusionFlags(&fusion);
-		  telemetry.ab_cmd = ab_out.deployment_cmd;
-		  telemetry.ab_pred_apogee_m = ab_out.predicted_apogee_agl_m;
-		  telemetry.ab_faults = ab_out.fault_flags;
-		  telemetry.ab_mode = ab_out.mode;
-		  telemetry.ab_boot = ab_boot_flags;
+		  telemetry_fill(&telemetry, timeTick, &accelData, &imu,
+		                 temperature_C, pressure_hPa, altitude_m,
+		                 FSM_GetState(&fsm), loop_us, loop_us_max,
+		                 &fusion, &ab_out, ab_boot_flags);
 
 #ifdef BENCH_BUILD
 		  if (++bench_print_count >= BENCH_PRINT_EVERY) {
 			  bench_print_count = 0;
-			  PrintTelemetryRecord(nand.log_next_page, (const uint8_t *)&telemetry, sizeof(telemetry));
+			  telemetry_print(nand.log_next_page, (const uint8_t *)&telemetry, sizeof(telemetry));
 		  }
 #endif
 
