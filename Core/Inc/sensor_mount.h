@@ -49,11 +49,11 @@
  * For each body axis: which raw axis (0 = X, 1 = Y, 2 = Z) and its sign.
  * Guess: raw X = nose, so body (x, y, z) = raw (Y, Z, X). */
 #define LSM_BODY_X_AXIS   1
-#define LSM_BODY_X_SIGN   (+1)
+#define LSM_BODY_X_SIGN   (-1)
 #define LSM_BODY_Y_AXIS   2
 #define LSM_BODY_Y_SIGN   (+1)
 #define LSM_BODY_Z_AXIS   0
-#define LSM_BODY_Z_SIGN   (+1)
+#define LSM_BODY_Z_SIGN   (-1)
 
 /* ---- H3LIS100DL (high-g accelerometer) -----------------------------
  * Guess: mounted the same way as the LSM6DSOX. It is a separate chip and
