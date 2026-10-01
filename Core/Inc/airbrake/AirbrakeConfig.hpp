@@ -59,16 +59,16 @@ inline constexpr uint16_t kMaxIntegrationSteps = 400;
 //
 // the four interact, so change them together rather than one at a time
 #ifndef AIRBRAKE_TUNE_REFRESH_TICKS
-#define AIRBRAKE_TUNE_REFRESH_TICKS 8
+#define AIRBRAKE_TUNE_REFRESH_TICKS 15
 #endif
 #ifndef AIRBRAKE_TUNE_PROBE_DELTA
-#define AIRBRAKE_TUNE_PROBE_DELTA 0.100217f
+#define AIRBRAKE_TUNE_PROBE_DELTA 0.0610685f
 #endif
 #ifndef AIRBRAKE_TUNE_GAIN_FRACTION
-#define AIRBRAKE_TUNE_GAIN_FRACTION 0.628356f
+#define AIRBRAKE_TUNE_GAIN_FRACTION 0.803013f
 #endif
 #ifndef AIRBRAKE_TUNE_BIAS_FLOOR
-#define AIRBRAKE_TUNE_BIAS_FLOOR 0.995577f
+#define AIRBRAKE_TUNE_BIAS_FLOOR 0.986974f
 #endif
 
 inline constexpr uint8_t kSensitivityRefreshTicks = AIRBRAKE_TUNE_REFRESH_TICKS;
