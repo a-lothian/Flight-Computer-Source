@@ -9,9 +9,10 @@
  *
  * *** UNVERIFIED - CHECK ON HARDWARE BEFORE FLIGHT ***
  * The mapping below is a guess: it assumes both chips have their X axis
- * pointing out of the nose (matching IMU_AXIS_VERTICAL 0 in the firmware's
- * config.h), which has never been checked on the real board. Once checked,
- * set SENSOR_MOUNT_VERIFIED to 1 to silence the build warning.
+ * pointing out of the nose, which has never been checked on the real board.
+ * Once checked, set SENSOR_MOUNT_VERIFIED to 1 to silence the build warning.
+ * The flight firmware's FSM reads this body frame too, so this file is the
+ * only axis mapping in the firmware.
  *
  * BENCH CHECK (~5 min, see also README section 7)
  *   1. Stand the board NOSE UP and still. Print the RAW driver values

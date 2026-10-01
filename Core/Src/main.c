@@ -353,9 +353,10 @@ int main(void)
 
 		  bool changed = FSM_NewReading(
 			  &fsm, 0, 0, 0, /* h3lis int8 accel: unused by fsm.c's logic */
-			  // the FSM expects the vertical axis as its y input - see IMU_AXIS_* in config.h
-			  imu.acceleration[IMU_AXIS_LATERAL_A], imu.acceleration[IMU_AXIS_VERTICAL], imu.acceleration[IMU_AXIS_LATERAL_B],
-			  imu.gyro[0], imu.gyro[1], imu.gyro[2], altitude_m, timeTick);
+			  // body frame from sensor_mount.h, the one axis mapping. The FSM
+			  // expects the nose axis (+ towards the nose) as its y input
+			  fusion_in.ax_mg, fusion_in.az_mg, fusion_in.ay_mg,
+			  fusion_in.gx_mdps, fusion_in.gy_mdps, fusion_in.gz_mdps, altitude_m, timeTick);
 
 		  if (changed && FSM_GetState(&fsm) == FSM_STATE_THRUST) {
 			  // launch: raw baro minus fusion AGL is the pad's pressure altitude,

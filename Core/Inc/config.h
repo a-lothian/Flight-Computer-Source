@@ -63,11 +63,8 @@
 /* Sensors ,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,, */
 
 /* IMU Axis Mapping
- * Which LSM6DSOX axis points up the rocket (reads ~+1000 mg on the pad).
- * The other two are the lateral axes, passed to the FSM as x and z. */
-#define IMU_AXIS_VERTICAL            0
-#define IMU_AXIS_LATERAL_A           1
-#define IMU_AXIS_LATERAL_B           2
+ * Lives in sensor_mount.h, the one place that says which chip axis points
+ * where. The fusion and the FSM both read the body frame it produces. */
 
 /* IMU Range and Data Rate
  * Register bits and LSB sensitivities are derived from these in IMU.c, so
