@@ -203,15 +203,16 @@ W25N_Status_t W25N_Log_Read(W25N_Handle_t *dev, uint32_t page_addr, uint32_t slo
  * keeps the driver itself free of any knowledge of your record layout. */
 typedef void (*W25N_Log_Dump_Cb)(uint32_t page_addr, const uint8_t *data, uint32_t length);
 
-/* Reads back the records in pages [0, page_count) and calls print_fn for
- * each one. A page ends at its first erased record (all 0xFF) - a partly
- * filled page, left by a flush or a reboot - and the log ends at a page
- * whose first record is erased. After W25N_Log_Resume, pass
- * dev->log_next_page as page_count. record_buf must be a caller-supplied
- * buffer at least `length` bytes - this driver never allocates a
+/* Reads back the records in pages [first_page, page_count) and calls
+ * print_fn for each one. A page ends at its first erased record (all 0xFF)
+ * - a partly filled page, left by a flush or a reboot - and the log ends at
+ * a page whose first record is erased. After W25N_Log_Resume, pass
+ * dev->log_next_page as page_count, and first_page 0 for the whole log.
+ * record_buf must be a caller-supplied buffer at least `length` bytes - this driver never allocates a
  * page-sized buffer itself (2048 bytes would overflow a small embedded
  * stack), so reuse a same-sized variable you already have (e.g. your
  * record struct) as scratch space. */
-void W25N_Log_Dump(W25N_Handle_t *dev, uint32_t page_count, void *record_buf, uint32_t length, W25N_Log_Dump_Cb print_fn);
+void W25N_Log_Dump(W25N_Handle_t *dev, uint32_t first_page, uint32_t page_count,
+                   void *record_buf, uint32_t length, W25N_Log_Dump_Cb print_fn);
 
 #endif

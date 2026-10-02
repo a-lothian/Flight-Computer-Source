@@ -1,0 +1,172 @@
+FLIGHT COMPUTER -> TELEMETRY BOARD: CAN LINK REFERENCE
+=======================================================
+Source of truth (flight-computer-testing, branch integration):
+  Core/Inc/telemetry_can.h, Core/Src/telemetry_can.c  - framing and sending
+  Core/Inc/telemetry.h (TelemetryRecordMini)          - packet layout
+  Core/Src/telemetry.c (telemetry_fill_mini)          - how fields are filled
+If anything here disagrees with those files, the files win.
+
+STATUS 2026-10-02: DISABLED for the 2026-10 flight (TELEMETRY_CAN_ENABLED 0
+in Core/Inc/config.h). The flight computer's CAN transceiver has no ground
+connection, so it cannot drive the bus. With the switch at 0 the flight
+computer never initialises CAN2 and sends nothing. Everything below applies
+once that is fixed and the switch is set back to 1.
+
+
+1. BUS
+------
+  Classic CAN 2.0A, 500 kbit/s, standard 11-bit IDs, data frames only.
+  Flight computer side: STM32F446 CAN2, PB12 = RX, PB13 = TX.
+    PCLK1 4 MHz, prescaler 1, BS1 5 tq, BS2 2 tq, SJW 1 -> 8 tq/bit,
+    sample point 75%.
+  Auto retransmission ON, auto bus-off recovery ON.
+  The Telemetry Board must be on the bus in normal (not silent) mode so it
+  ACKs frames; without an ACK the flight computer drops the packets.
+
+
+2. FRAMING
+----------
+  One packet = TelemetryRecordMini, 53 bytes, sent as 7 consecutive frames:
+
+    frame i (0..6):  StdId = 0x0AA + i
+                     DLC   = min(8, 53 - 8*i)
+                     data  = packet bytes [8*i .. 8*i + DLC - 1]
+
+    ID      DLC  packet bytes
+    0x0AA   8     0 -  7
+    0x0AB   8     8 - 15
+    0x0AC   8    16 - 23
+    0x0AD   8    24 - 31
+    0x0AE   8    32 - 39
+    0x0AF   8    40 - 47
+    0x0B0   5    48 - 52
+
+  - No header byte, no length byte, no CRC in the payload (CAN's own CRC
+    covers each frame).
+  - Frames are queued back to back with TX FIFO priority, so they arrive
+    in ID order.
+  - Rate: one packet every 10 control loops = 5 Hz (TELEMETRY_CAN_EVERY in
+    Core/Inc/config.h). The whole packet takes about 1 ms on the bus.
+  - The packet has no sequence counter or timestamp.
+  - No other traffic is sent on IDs 0x0AA-0x0B0.
+
+  Suggested receiver logic:
+    - Filter on IDs 0x0AA-0x0B0.
+    - On 0x0AA: start a new packet (discard any partial one).
+    - On 0x0AA+i: accept only if it is the next expected ID and DLC
+      matches the table, else discard the partial packet.
+    - On 0x0B0 accepted: the packet is complete; keep it as the latest.
+  A partial packet happens when the flight computer aborts a send (see
+  section 4), so it must be thrown away, never forwarded.
+
+
+3. PACKET LAYOUT (TelemetryRecordMini, packed, little-endian, IEEE-754 float32)
+-------------------------------------------------------------------------------
+  off  type     field              units / meaning
+    0  float    imu_accel[0]       g (1 g = 9.80665 m/s^2), rocket body frame
+    4  float    imu_accel[1]       g
+    8  float    imu_accel[2]       g, z = out of the nose
+   12  float    imu_gyro[0]        deg/s, rocket body frame
+   16  float    imu_gyro[1]        deg/s
+   20  float    imu_gyro[2]        deg/s
+   24  float    temperature_C      deg C
+   28  float    pressure_hPa       hPa
+   32  float    fused_altitude     m above the pad (sensor fusion)
+   36  float    fused_velocity     m/s, vertical, + up
+   40  float    fusion_tilt_deg    deg, nose from vertical
+   44  uint8    fsm_state          0 READY, 1 THRUST, 2 COAST, 3 APOGEE,
+                                   4 SECOND_CHUTE, 5 LANDED
+   45  float    ab_cmd             airbrake command, 0 closed .. 1 full
+   49  float    ab_pred_apogee_m   predicted apogee, m above the pad,
+                                   0 while the airbrakes are inhibited
+  total 53 bytes
+
+  The struct is packed: the floats at 45 and 49 are NOT 4-byte aligned.
+  On the receiver, either declare the same struct with
+  __attribute__((packed)) (and check sizeof == 53), or memcpy each field
+  out of the byte buffer. Don't cast an unaligned address to float*.
+
+  C definition (copy as is):
+
+    typedef struct __attribute__((packed)) {
+        float   imu_accel[3];
+        float   imu_gyro[3];
+        float   temperature_C;
+        float   pressure_hPa;
+        float   fused_altitude;
+        float   fused_velocity;
+        float   fusion_tilt_deg;
+        uint8_t fsm_state;
+        float   ab_cmd;
+        float   ab_pred_apogee_m;
+    } TelemetryRecordMini;
+    _Static_assert(sizeof(TelemetryRecordMini) == 53, "must be 53 bytes");
+
+  Python: struct.unpack("<3f3f5fBff", data)  # data = the 53 bytes
+
+
+4. SENDING FUNCTION (flight computer side, for reference)
+---------------------------------------------------------
+  main loop, every TELEMETRY_CAN_EVERY loops (if CAN started at boot):
+
+    telemetry_fill_mini(&radio, &fusion_in, temperature_C, pressure_hPa,
+                        &fusion, FSM_GetState(&fsm), &ab_out);
+    (void)telemetry_can_send(&hcan2, &radio, sizeof(radio));
+
+  telemetry_fill_mini() copies this loop's values into the packet,
+  converting the IMU from mg to g and from mdps to deg/s.
+
+  HAL_StatusTypeDef telemetry_can_send(CAN_HandleTypeDef *hcan,
+                                       const void *packet, uint32_t length)
+    - Splits the packet into ceil(length/8) frames, IDs 0x0AA + i, as in
+      section 2, and queues them in order into the 3 TX mailboxes, waiting
+      for a free mailbox as they drain.
+    - If the previous packet is still stuck in the mailboxes (nobody
+      ACKing, or bus-off), it aborts them and returns HAL_BUSY without
+      sending.
+    - If the mailboxes don't free up within 3 ms, it aborts the rest and
+      returns HAL_TIMEOUT. This is the partial packet case.
+    - It never blocks the flight loop for more than a few ms. Telemetry is
+      best effort: nothing in flight depends on it.
+
+  telemetry_can_start() runs once at boot. If the bus isn't idle then (RX
+  held dominant), the boot log prints "CAN telemetry: NOT started, bus not
+  idle, will retry" and telemetry_can_poll() checks once a second, starting
+  telemetry as soon as the bus goes idle. A wrong CAN setup ("NOT started,
+  bad setup") is a firmware bug and never recovers.
+
+  Once a second, while a debugger is reading SWO, the flight computer
+  prints a status line, e.g.
+    CAN on: tec=0 rec=0 lec=0, packets queued 5 dropped 0
+  TEC climbing with lec=3 (no ACK): frames go out but nothing receives
+  them. lec=5 (bit dominant error): its frames don't reach the bus.
+
+
+5. EXAMPLE PACKET
+-----------------
+  Made-up coast-phase values (chosen to be exact in float32):
+
+    imu_accel        =  0.125, -0.0625, -1.5   g
+    imu_gyro         =  2.5,   -1.25,   12.0   deg/s
+    temperature_C    =  18.5
+    pressure_hPa     =  845.25
+    fused_altitude   =  1520.5
+    fused_velocity   =  180.25
+    fusion_tilt_deg  =  6.5
+    fsm_state        =  2 (COAST)
+    ab_cmd           =  0.375
+    ab_pred_apogee_m =  3125.0
+
+  Frames on the bus (data bytes in hex, in order):
+
+    0x0AA  DLC 8  00 00 00 3E 00 00 80 BD
+    0x0AB  DLC 8  00 00 C0 BF 00 00 20 40
+    0x0AC  DLC 8  00 00 A0 BF 00 00 40 41
+    0x0AD  DLC 8  00 00 94 41 00 50 53 44
+    0x0AE  DLC 8  00 10 BE 44 00 40 34 43
+    0x0AF  DLC 8  00 00 D0 40 02 00 00 C0
+    0x0B0  DLC 5  3E 00 50 43 45
+
+  E.g. bytes 0-3 = 00 00 00 3E -> 0x3E000000 = 0.125 (imu_accel[0]);
+  byte 44 = 02 (COAST); bytes 45-48 = 00 00 C0 3E -> 0.375 (ab_cmd),
+  split across frames 0x0AF and 0x0B0.

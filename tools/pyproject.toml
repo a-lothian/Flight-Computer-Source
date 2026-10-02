@@ -4,7 +4,9 @@ version = "0.1.0"
 description = "PC-side tools for the flight computer: collect the NAND log over SWO as CSV"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "pyelftools>=0.33",
+]
 
 [project.scripts]
 capture-log = "flight_log_tools.capture_log:main"

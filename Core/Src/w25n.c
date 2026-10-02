@@ -522,25 +522,32 @@ W25N_Status_t W25N_Log_Erase(W25N_Handle_t *dev, uint32_t length)
     return first_fail;
 }
 
-void W25N_Log_Dump(W25N_Handle_t *dev, uint32_t page_count, void *record_buf, uint32_t length, W25N_Log_Dump_Cb print_fn)
+void W25N_Log_Dump(W25N_Handle_t *dev, uint32_t first_page, uint32_t page_count,
+                   void *record_buf, uint32_t length, W25N_Log_Dump_Cb print_fn)
 {
     uint32_t per_page = W25N_Records_Per_Page(length);
+    if (per_page == 0) return;
 
-    for (uint32_t p = 0; p < page_count; p++) {
-        /* one array read per page, then each record straight from the buffer */
+    /* One page-sized buffer. You said you don't want to allocate 2048 B
+     * on the stack — make this a static or pass it in like record_buf. */
+    static uint8_t page_buf[W25N_PAGE_SIZE_BYTES];
+
+    for (uint32_t p = first_page; p < page_count; p++) {
         W25N_Status_t ecc = W25N_Page_To_Buffer(dev, p);
-        if (ecc != W25N_OK && ecc != W25N_ECC_WARN) {
-            continue; /* extend with a status-aware callback variant if per-page error reporting is needed */
-        }
+        if (ecc != W25N_OK && ecc != W25N_ECC_WARN) continue;
+
+        /* ONE SPI transaction for the whole page buffer */
+        if (W25N_Read_Data(dev, 0, page_buf, W25N_PAGE_SIZE_BYTES) != W25N_OK)
+            continue;
+
         for (uint32_t slot = 0; slot < per_page; slot++) {
-            if (W25N_Read_Data(dev, (uint16_t)(slot * length), (uint8_t *)record_buf, length) != W25N_OK) {
-                continue;
+            const uint8_t *rec = &page_buf[slot * length];
+
+            if (W25N_Is_Erased(rec, length)) {
+                if (slot == 0) return;   /* end of log */
+                break;                    /* partial page */
             }
-            if (W25N_Is_Erased((const uint8_t *)record_buf, length)) {
-                if (slot == 0) return; /* page never written: the end of the log */
-                break;                 /* partly filled page (flush or reboot) */
-            }
-            print_fn(p, (const uint8_t *)record_buf, length);
+            print_fn(p, rec, length);
         }
     }
 }

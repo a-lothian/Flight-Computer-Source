@@ -43,8 +43,8 @@
 
 /* SECOND_CHUTE State Verification
  * Deploys once altitude + MAIN_DEPLOY_MARGIN_M drops below MAIN_DEPLOY_ALTITUDE_M.
- * NOTE: compared against the raw baro altitude, which is above standard sea
- * level, NOT above the pad. */
+ * The FSM is fed the fusion's altitude, so all FSM altitudes (this, the
+ * launch gain and the apogee drop) are above the pad. */
 #define MAIN_DEPLOY_ALTITUDE_M       900.0f
 #define MAIN_DEPLOY_MARGIN_M         10.0f
 
@@ -112,11 +112,30 @@
  * Debug builds only - Release refuses to build with it set. */
 #define LOG_ERASE_AT_BOOT            0
 
+/* Live telemetry ,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,, */
+
+/* 0 = no CAN telemetry: CAN2 is never initialised, so PB12/PB13 stay
+ * undriven inputs (their reset state), and the loop never sends. Off for
+ * the 2026-10 flight: the flight computer's CAN transceiver has no ground
+ * connection, so it can't drive the bus, and a send that can never finish
+ * would cost the loop 3 ms. 1 only once that hardware is fixed. NAND
+ * logging doesn't depend on it. */
+#define TELEMETRY_CAN_ENABLED        0
+
+/* Loops between packets to the Telemetry Board over CAN (telemetry_can.h):
+ * 50 Hz / 10 = 5 Hz. It keeps only the latest complete packet and sends it
+ * over LoRa every few seconds, so faster gains nothing; send at least 1 Hz. */
+#define TELEMETRY_CAN_EVERY          10
+
+/* ms between CAN status checks: start CAN if the boot start found the bus
+ * busy, and print the error counters over SWO (telemetry_can.h) */
+#define TELEMETRY_CAN_STATUS_MS      1000
+
 /* Buzzer ,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,, */
 
-#define STARTUP_BEEP_COUNT           1
-#define STARTUP_BEEP_ON_MS           100
-#define STARTUP_BEEP_OFF_MS          200
+#define STARTUP_BEEP_COUNT           3
+#define STARTUP_BEEP_ON_MS           50
+#define STARTUP_BEEP_OFF_MS          75
 #define READY_BEEP_MS                500
 
 /* Motor ,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,, */

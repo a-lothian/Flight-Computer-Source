@@ -47,6 +47,7 @@
 #include "bench.h"
 
 #include "telemetry.h"
+#include "telemetry_can.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -64,6 +65,8 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+CAN_HandleTypeDef hcan2;
+
 I2C_HandleTypeDef hi2c1;
 I2C_HandleTypeDef hi2c3;
 
@@ -97,6 +100,15 @@ int32_t last_prs_raw; /* a changed pressure is the only sign of a new baro sampl
 
 uint8_t ab_boot_flags;
 
+#if LOG_DUMP_AT_BOOT
+/* capture-log --last-minutes writes this over SWD before it switches SWO
+ * on (it finds the address in the Debug ELF): DUMP_REQUEST_MAGIC, then how
+ * many of the newest records to dump. Without the magic the whole log is
+ * dumped. Volatile: only the debugger writes it. */
+#define DUMP_REQUEST_MAGIC 0xD0A9D0A9u
+volatile uint32_t dump_request[2];
+#endif
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -108,6 +120,7 @@ static void MX_SPI3_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_TIM5_Init(void);
+static void MX_CAN2_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -127,6 +140,53 @@ static uint32_t LoopTimer_Elapsed_us(uint32_t start_cycles)
 {
     return (DWT->CYCCNT - start_cycles) / (SystemCoreClock / 1000000u);
 }
+
+#if LOG_DUMP_AT_BOOT
+/* The dump build only: switch from the 8 MHz crystal to the PLL at 128 MHz,
+ * so the dump is limited by SWO rather than the CPU. 128 MHz keeps SPI1 (the
+ * NAND) at the same 2 MHz it runs at in flight: APB2 64 MHz / 32. The
+ * programmer must be told this clock (freq=128, capture-log's --hclk-mhz
+ * default) or the SWO output is garbage. */
+#define DUMP_HCLK_MHZ 128
+
+static HAL_StatusTypeDef Dump_Clock_Up(void)
+{
+  // TIM5 drives the airbrake servo and would run 16x fast: let it go limp
+  HAL_TIM_PWM_Stop(&htim5, TIM_CHANNEL_1);
+
+  __HAL_RCC_PWR_CLK_ENABLE();
+  __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
+
+  RCC_OscInitTypeDef osc = {0};
+  osc.OscillatorType = RCC_OSCILLATORTYPE_NONE;   // the HSE is already running
+  osc.PLL.PLLState = RCC_PLL_ON;
+  osc.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+  osc.PLL.PLLM = 4;                 // 8 MHz / 4 = 2 MHz PLL input (1-2 MHz allowed)
+  osc.PLL.PLLN = 128;               // 256 MHz VCO (100-432 MHz allowed)
+  osc.PLL.PLLP = RCC_PLLP_DIV2;     // 128 MHz system clock
+  osc.PLL.PLLQ = 8;                 // 32 MHz, unused
+  osc.PLL.PLLR = 2;                 // 128 MHz, unused
+  if (HAL_RCC_OscConfig(&osc) != HAL_OK) {
+    return HAL_ERROR;               // still on the crystal at 8 MHz
+  }
+
+  RCC_ClkInitTypeDef clk = {0};
+  clk.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK
+                | RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
+  clk.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+  clk.AHBCLKDivider = RCC_SYSCLK_DIV1;
+  clk.APB1CLKDivider = RCC_HCLK_DIV4;   // 32 MHz (max 45)
+  clk.APB2CLKDivider = RCC_HCLK_DIV2;   // 64 MHz (max 90)
+  // 4 flash wait states covers up to 150 MHz at 2.7-3.6 V. Also re-times
+  // SysTick, so HAL_Delay stays in ms
+  if (HAL_RCC_ClockConfig(&clk, FLASH_LATENCY_4) != HAL_OK) {
+    return HAL_ERROR;
+  }
+
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_32;   // 64 MHz / 32 = 2 MHz
+  return HAL_SPI_Init(&hspi1);
+}
+#endif
 
 /* USER CODE END 0 */
 
@@ -164,22 +224,41 @@ int main(void)
   MX_SPI1_Init();
   MX_TIM2_Init();
   MX_TIM5_Init();
+  MX_CAN2_Init();
   /* USER CODE BEGIN 2 */
 
   Motor_t airbrake_motor;
 
+#if !(LOG_ERASE_AT_BOOT || LOG_DUMP_AT_BOOT)
+  // standard build
   for (int i = 0; i < STARTUP_BEEP_COUNT; i++) {
   		  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_4);
   		  HAL_Delay(STARTUP_BEEP_ON_MS);
   		  HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_4);
   		  HAL_Delay(STARTUP_BEEP_OFF_MS);
   	}
+#endif
+
+#if LOG_ERASE_AT_BOOT || LOG_DUMP_AT_BOOT
+  // log dump or erase build
+  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_4);
+  HAL_Delay(STARTUP_BEEP_ON_MS * 35);
+  HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_4);
+
+#endif
+  printf("SERIAL CHECK\n");
 
 
-  HAL_Delay(STARTUP_BEEP_OFF_MS);
+  //HAL_Delay(STARTUP_BEEP_OFF_MS);
 
   // starts at MOTOR_STARTUP_ANGLE_DEG (closed), nothing else moves it at boot
   mtr_init(&airbrake_motor, &htim5, TIM_CHANNEL_1);
+
+
+
+
+//  bench_boot_tests(&airbrake_motor, &htim2);
+
 
   accel.i2c_handle = &hi2c1;
   accel.device_addr = H3LIS_ADDR_HIGH;
@@ -267,9 +346,13 @@ int main(void)
          ab_cd_table_provenance(), (int)ab_cfg_status, (int)ab_test_status);
 
 #ifdef BENCH_BUILD
-  // before the fusion's first update, so its calibration starts after the servo stops
-  bench_boot_tests(&airbrake_motor, &htim2);
-  uint32_t bench_print_count = 0;
+    while (1) {
+  	  mtr_set_angle_deg(&airbrake_motor, MOTOR_ANGLE_MAX_DEG);
+  	  HAL_Delay(5000);
+  	  mtr_set_angle_deg(&airbrake_motor, MOTOR_ANGLE_MIN_DEG);
+  	  HAL_Delay(5000);
+    }
+  uint32_t bench_print_count = 0;  // the loop below still uses it
 #endif
 
   LoopTimer_Init();
@@ -279,22 +362,60 @@ int main(void)
 #ifndef DEBUG
 #error "LOG_DUMP_AT_BOOT stops the firmware after the dump - it must never be set in a Release (flight) build"
 #endif
+  // before anything goes out over SWO, which the programmer times from the
+  // clock it's told. If this fails the board stays at 8 MHz: capture with
+  // --hclk-mhz 8
+  HAL_StatusTypeDef dump_clock = Dump_Clock_Up();
   printf("DUMPING NAND LOG *** BEGIN IN %ims", LOG_DUMP_START_DELAY_MS);
   // ITM drops every character until a debugger turns SWO on, so wait for
-  // the capture (uv run capture-log in tools/, or CubeIDE's SWV console) to start
+  // the capture (uv run capture-log in tools/) to start
   while (!((ITM->TCR & ITM_TCR_ITMENA_Msk) && (ITM->TER & 1UL))) {
   }
   HAL_Delay(LOG_DUMP_START_DELAY_MS);
   printf("\r\n");
+  // the SWO bit rate the programmer chose, from the prescaler it set
+  printf("# clock hclk_mhz=%lu clock_up=%d swo_khz=%lu\r\n",
+         (unsigned long)(SystemCoreClock / 1000000u), (int)dump_clock,
+         (unsigned long)(SystemCoreClock / 1000u / ((TPI->ACPR & 0x1FFFu) + 1u)));
   // log size first, so the capture can show progress
   printf("# log pages=%lu records_per_page=%lu\r\n", (unsigned long)nand.log_next_page,
          (unsigned long)(W25N_PAGE_SIZE_BYTES / sizeof(TelemetryRecord_t)));
+  // records go out base64 encoded and capture-log turns them back into CSV:
+  // printf's float formatting took most of a CSV dump's time at 8 MHz
+  printf("# format=b64 record_bytes=%lu\r\n", (unsigned long)sizeof(TelemetryRecord_t));
+  // where to start: the whole log, or enough pages for the records asked for,
+  // plus one because the newest page may be only partly filled
+  uint32_t dump_first_page = 0;
+  if (dump_request[0] == DUMP_REQUEST_MAGIC) {
+    uint32_t per_page = W25N_PAGE_SIZE_BYTES / sizeof(TelemetryRecord_t);
+    uint32_t pages = dump_request[1] / per_page + 2;   // rounded up, plus one
+    dump_first_page = (pages < nand.log_next_page) ? nand.log_next_page - pages : 0;
+  }
+  printf("# dump first_page=%lu\r\n", (unsigned long)dump_first_page);
   telemetry_print_csv_header();
-  W25N_Log_Dump(&nand, nand.log_next_page, &telemetry, sizeof(telemetry), telemetry_print_csv);
+  W25N_Log_Dump(&nand, dump_first_page, nand.log_next_page, &telemetry, sizeof(telemetry),
+                telemetry_print_b64);
   printf("# end of log\r\n");
   // stop here, so the dump build never adds to the log it just read
   while (1) {
   }
+#endif
+
+#if TELEMETRY_CAN_ENABLED
+  // live telemetry to the Telemetry Board over CAN2. Failing here only
+  // loses the radio link: nothing in flight depends on it
+  HAL_StatusTypeDef can_status = telemetry_can_start(&hcan2);
+  bool can_ok = (can_status == HAL_OK);
+  printf("CAN telemetry: %s (status %d, error 0x%lx)\r\n",
+         can_ok ? "started" :
+         (hcan2.ErrorCode & HAL_CAN_ERROR_TIMEOUT) ? "NOT started, bus not idle, will retry" :
+         "NOT started, bad setup",
+         (int)can_status, (unsigned long)hcan2.ErrorCode);
+  TelemetryRecordMini radio;
+  uint32_t radio_count = 0;
+  uint32_t can_status_tick = HAL_GetTick();
+#else
+  printf("CAN telemetry: disabled (TELEMETRY_CAN_ENABLED 0)\r\n");
 #endif
 
   /* USER CODE END 2 */
@@ -336,7 +457,11 @@ int main(void)
 			  // body frame from sensor_mount.h, the one axis mapping. The FSM
 			  // expects the nose axis (+ towards the nose) as its y input
 			  fusion_in.ax_mg, fusion_in.az_mg, fusion_in.ay_mg,
-			  fusion_in.gx_mdps, fusion_in.gy_mdps, fusion_in.gz_mdps, altitude_m, timeTick);
+			  fusion_in.gx_mdps, fusion_in.gy_mdps, fusion_in.gz_mdps,
+			  // fusion altitude above the pad, not raw baro: the fusion rejects
+			  // bad baro reads, and one bad read would otherwise set the FSM's
+			  // max altitude and call apogee mid-coast, ending airbrake control
+			  fusion.altitude, timeTick);
 
 		  if (changed && FSM_GetState(&fsm) == FSM_STATE_THRUST) {
 			  // launch: raw baro minus fusion AGL is the pad's pressure altitude,
@@ -389,6 +514,27 @@ int main(void)
 			  printf("NAND write failed at page %lu, status %d\r\n", (unsigned long)nand.log_next_page, nandStatus);
 		  }
 
+#if TELEMETRY_CAN_ENABLED
+		  // live telemetry, every TELEMETRY_CAN_EVERY loops. A dead bus costs at
+		  // most a few ms here (see telemetry_can_send)
+		  if (can_ok && ++radio_count >= TELEMETRY_CAN_EVERY) {
+			  radio_count = 0;
+			  telemetry_fill_mini(&radio, &fusion_in, temperature_C, pressure_hPa,
+			                      &fusion, FSM_GetState(&fsm), &ab_out);
+			  (void)telemetry_can_send(&hcan2, &radio, sizeof(radio));
+		  }
+
+		  // once a second: start CAN if the boot start found the bus busy,
+		  // and print the CAN error counters (only while SWO is being read)
+		  if (timeTick - can_status_tick >= TELEMETRY_CAN_STATUS_MS) {
+			  can_status_tick = timeTick;
+			  if (!can_ok) {
+				  can_ok = telemetry_can_poll(&hcan2);
+			  }
+			  telemetry_can_print_status(&hcan2);
+		  }
+#endif
+
 		  loop_us = LoopTimer_Elapsed_us(loopStart);
 		  if (loop_us > loop_us_max) {
 			  loop_us_max = loop_us;
@@ -438,6 +584,47 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+}
+
+/**
+  * @brief CAN2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_CAN2_Init(void)
+{
+
+  /* USER CODE BEGIN CAN2_Init 0 */
+#if !TELEMETRY_CAN_ENABLED
+  // CAN telemetry is off (config.h): leave CAN2 and its pins untouched
+  return;
+#endif
+
+  /* USER CODE END CAN2_Init 0 */
+
+  /* USER CODE BEGIN CAN2_Init 1 */
+
+  /* USER CODE END CAN2_Init 1 */
+  hcan2.Instance = CAN2;
+  hcan2.Init.Prescaler = 1;
+  hcan2.Init.Mode = CAN_MODE_NORMAL;
+  hcan2.Init.SyncJumpWidth = CAN_SJW_1TQ;
+  hcan2.Init.TimeSeg1 = CAN_BS1_5TQ;
+  hcan2.Init.TimeSeg2 = CAN_BS2_2TQ;
+  hcan2.Init.TimeTriggeredMode = DISABLE;
+  hcan2.Init.AutoBusOff = ENABLE;
+  hcan2.Init.AutoWakeUp = DISABLE;
+  hcan2.Init.AutoRetransmission = ENABLE;
+  hcan2.Init.ReceiveFifoLocked = DISABLE;
+  hcan2.Init.TransmitFifoPriority = ENABLE;
+  if (HAL_CAN_Init(&hcan2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN CAN2_Init 2 */
+
+  /* USER CODE END CAN2_Init 2 */
+
 }
 
 /**

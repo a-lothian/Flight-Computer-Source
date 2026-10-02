@@ -19,6 +19,7 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
  ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_dma.h \
  ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_dma_ex.h \
  ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_cortex.h \
+ ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_can.h \
  ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_flash.h \
  ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_flash_ex.h \
  ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_flash_ramfunc.h \
@@ -31,7 +32,12 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
  ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_tim_ex.h \
  ../Core/Inc/h3lis.h ../Core/Inc/dps368.h ../Core/Inc/IMU.h \
  ../Core/Inc/w25n.h ../Core/Inc/fsm.h ../Core/Inc/mtr_control.h \
- ../Core/Inc/config.h
+ ../Core/Inc/config.h ../Core/Inc/sensor_fusion.h \
+ ../Core/Inc/sensor_mount.h ../Core/Inc/sensor_fusion.h \
+ ../Core/Inc/airbrake_api.h ../Core/Inc/airbrake_io.h \
+ ../Core/Inc/airbrake_api.h ../Core/Inc/fsm.h ../Core/Inc/bench.h \
+ ../Core/Inc/mtr_control.h ../Core/Inc/telemetry.h ../Core/Inc/IMU.h \
+ ../Core/Inc/h3lis.h ../Core/Inc/telemetry_can.h
 ../Core/Inc/main.h:
 ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal.h:
 ../Core/Inc/stm32f4xx_hal_conf.h:
@@ -53,6 +59,7 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
 ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_dma.h:
 ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_dma_ex.h:
 ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_cortex.h:
+../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_can.h:
 ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_flash.h:
 ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_flash_ex.h:
 ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_flash_ramfunc.h:
@@ -70,3 +77,16 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
 ../Core/Inc/fsm.h:
 ../Core/Inc/mtr_control.h:
 ../Core/Inc/config.h:
+../Core/Inc/sensor_fusion.h:
+../Core/Inc/sensor_mount.h:
+../Core/Inc/sensor_fusion.h:
+../Core/Inc/airbrake_api.h:
+../Core/Inc/airbrake_io.h:
+../Core/Inc/airbrake_api.h:
+../Core/Inc/fsm.h:
+../Core/Inc/bench.h:
+../Core/Inc/mtr_control.h:
+../Core/Inc/telemetry.h:
+../Core/Inc/IMU.h:
+../Core/Inc/h3lis.h:
+../Core/Inc/telemetry_can.h:

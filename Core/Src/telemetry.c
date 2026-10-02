@@ -6,6 +6,9 @@
 
 #include "telemetry.h"
 #include <stdio.h>
+#include <string.h>
+
+extern int __io_putchar(int ch);   /* main.c: one character out over ITM */
 
 static uint8_t FusionFlags(const FusionOutput *f)
 {
@@ -49,6 +52,27 @@ void telemetry_fill(TelemetryRecord_t *rec, uint32_t timestamp_ms,
     rec->ab_faults = ab->fault_flags;
     rec->ab_mode = ab->mode;
     rec->ab_boot = ab_boot_flags;
+}
+
+void telemetry_fill_mini(TelemetryRecordMini *pkt, const FusionInput *body,
+                         float temperature_C, float pressure_hPa,
+                         const FusionOutput *fusion, FSM_State_t fsm_state,
+                         const AB_TickOutput *ab)
+{
+    pkt->imu_accel[0] = body->ax_mg * 0.001f;     /* mg -> g */
+    pkt->imu_accel[1] = body->ay_mg * 0.001f;
+    pkt->imu_accel[2] = body->az_mg * 0.001f;
+    pkt->imu_gyro[0] = body->gx_mdps * 0.001f;    /* mdps -> deg/s */
+    pkt->imu_gyro[1] = body->gy_mdps * 0.001f;
+    pkt->imu_gyro[2] = body->gz_mdps * 0.001f;
+    pkt->temperature_C = temperature_C;
+    pkt->pressure_hPa = pressure_hPa;
+    pkt->fused_altitude = fusion->altitude;
+    pkt->fused_velocity = fusion->velocity;
+    pkt->fusion_tilt_deg = fusion->tilt_deg;
+    pkt->fsm_state = (uint8_t)fsm_state;
+    pkt->ab_cmd = ab->deployment_cmd;
+    pkt->ab_pred_apogee_m = ab->predicted_apogee_agl_m;
 }
 
 void telemetry_print(uint32_t page_addr, const uint8_t *data, uint32_t length)
@@ -103,4 +127,63 @@ void telemetry_print_csv(uint32_t page_addr, const uint8_t *data, uint32_t lengt
            rec->fusion_altitude_m, rec->fusion_velocity_mps, rec->fusion_accel_vert,
            rec->fusion_tilt_deg, rec->fusion_flags,
            rec->ab_cmd, rec->ab_pred_apogee_m, rec->ab_faults, rec->ab_mode, rec->ab_boot);
+}
+
+static const char kBase64[] =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/* The dump's speed depends on these two, and Debug builds (the only ones
+ * that dump) are unoptimised, so optimise them anyway */
+#define DUMP_FAST __attribute__((optimize("O2")))
+
+/* CRC-16/CCITT-FALSE (poly 0x1021, init 0xFFFF), half a byte at a time */
+DUMP_FAST static uint16_t Crc16(const uint8_t *data, uint32_t length)
+{
+    static const uint16_t kNibble[16] = {
+        0x0000, 0x1021, 0x2042, 0x3063, 0x4084, 0x50A5, 0x60C6, 0x70E7,
+        0x8108, 0x9129, 0xA14A, 0xB16B, 0xC18C, 0xD1AD, 0xE1CE, 0xF1EF
+    };
+    uint16_t crc = 0xFFFF;
+    for (uint32_t i = 0; i < length; i++) {
+        crc = (uint16_t)((crc << 4) ^ kNibble[(crc >> 12) ^ (data[i] >> 4)]);
+        crc = (uint16_t)((crc << 4) ^ kNibble[(crc >> 12) ^ (data[i] & 0x0Fu)]);
+    }
+    return crc;
+}
+
+DUMP_FAST void telemetry_print_b64(uint32_t page_addr, const uint8_t *data, uint32_t length)
+{
+    uint8_t buf[4 + sizeof(TelemetryRecord_t)];
+    if (length > sizeof(TelemetryRecord_t)) {
+        return;
+    }
+    buf[0] = (uint8_t)page_addr;
+    buf[1] = (uint8_t)(page_addr >> 8);
+    buf[2] = (uint8_t)(page_addr >> 16);
+    buf[3] = (uint8_t)(page_addr >> 24);
+    memcpy(&buf[4], data, length);
+    uint32_t n = 4 + length;
+
+    /* this bypasses stdio, so anything printf'd before must go out first */
+    fflush(stdout);
+
+    __io_putchar('@');
+    for (uint32_t i = 0; i < n; i += 3) {
+        uint32_t rest = n - i;
+        uint32_t v = ((uint32_t)buf[i] << 16) |
+                     (rest > 1 ? (uint32_t)buf[i + 1] << 8 : 0u) |
+                     (rest > 2 ? (uint32_t)buf[i + 2] : 0u);
+        __io_putchar(kBase64[(v >> 18) & 0x3Fu]);
+        __io_putchar(kBase64[(v >> 12) & 0x3Fu]);
+        __io_putchar(rest > 1 ? kBase64[(v >> 6) & 0x3Fu] : '=');
+        __io_putchar(rest > 2 ? kBase64[v & 0x3Fu] : '=');
+    }
+
+    uint16_t crc = Crc16(buf, n);
+    __io_putchar('*');
+    for (int shift = 12; shift >= 0; shift -= 4) {
+        __io_putchar("0123456789ABCDEF"[(crc >> shift) & 0x0Fu]);
+    }
+    __io_putchar('\r');
+    __io_putchar('\n');
 }
